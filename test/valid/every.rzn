@@ -1,0 +1,30 @@
+sync task CarbonDetector() {
+  accepts {
+    void poll();
+    void stop();
+  }
+  emits {
+    void detected();
+  }
+}
+
+sync task Siren() {
+  accepts {
+    void start():
+      service: "/siren_start" "std_msgs::SirenControl";
+    void stop():
+      service: "/siren_stop" "std_msgs::SirenControl";
+  }
+}
+
+task component MonitorSmoke (detector req CarbonDetector, siren req Siren) {
+  trigger: void start();
+  return: void done();
+  abort: void abort();
+  error: void failed();
+
+  strategy {
+    abrt: detector.stop() --> end;
+    main: siren.stop() --> every 10 { detector.poll() } on abort abrt on detector.detected() (siren.start() --> end);
+  }
+}

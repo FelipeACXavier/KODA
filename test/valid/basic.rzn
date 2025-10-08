@@ -1,0 +1,32 @@
+async task Drive(float x, float y) {
+  trigger: void to_position(float x, float y);
+  return: void  in_position(float x, float y);
+}
+
+sync task Locator() {
+  accepts {
+    void locate();
+    void stop ();
+  }
+  emits {
+    void located();
+  }
+}
+    
+task component Patrol (drive req Drive, locator req Locator, float x1, float y1, float x2, float y2) {
+  trigger: void start(float x1, float y1, float x2, float y2);
+  abort: void abort();
+  error: void failed();
+  
+  vars {
+    float x1_ = x1 : 0.0
+    float y1_ = y1 : 0.0
+    float x2_ = x2 : 0.0
+    float y2_ = y2 : 0.0
+  }
+
+  strategy {
+    found: drive(x, y) --> end;
+    main: locator.locate() --> repeat(drive(a,b) on locator.located() found);
+  }
+}

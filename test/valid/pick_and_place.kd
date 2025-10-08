@@ -1,0 +1,57 @@
+capability Drive(float x, float y) {
+  action "/navigate_to_pose" "nav2_msgs::action::NavigateToPose::Goal" {
+    trigger: void to_position(float x, float y);
+    abort: void cancel();
+    return: void in_position(float x, float y);
+    error: void path_blocked();
+  }
+}
+
+capability Vision() {
+  action "/recognize" "std_msgs::String" {
+    trigger: void recognize();
+    return: void found();
+    abort: void cancel();
+  }
+}
+
+capability Grip(int grip) {
+  action "/handler/action" "std_msgs::String" {
+    trigger: void handle(boolean grip);
+    return: void handled();
+    error: void failed();
+    abort: void cancel();
+  }
+}
+
+
+task PickAndDrop (drive req Drive, vision req Vision, 
+                  grip req Grip,
+                  float x1, float y1, float x2, float y2) 
+{
+  trigger: void start(float x1, float y1, float x2, float y2);
+  return: void done();
+  abort: void abort();
+  error: void failed();
+
+  vars {
+    float x1_ = x1 : 0.0
+    float y1_ = y1 : 0.0
+    float x2_ = x2 : 0.0
+    float y2_ = y2 : 0.0
+  }
+
+  strategy {
+    err: drive.abort() --> vision.abort() --> grip.abort() --> end;
+
+    pick: (within 30 do (vision() on abort err) else (err)) --> (grip(true) on error err on abort err);
+    drop: grip(false) on error err on abort err;
+
+    loop: (drive(x1_, y1_) on error err on abort err) -->
+          pick -->
+          (drive(x2_, y2_) on error err on abort err) -->
+          drop;
+
+    main: repeat(loop);
+  }
+}

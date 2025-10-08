@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+Project-Name: koda
+Source: src
+Language: koda::Plugin
+Language-Name: System
+Language-Extensions: kd
+Require-Libraries: |lib://rascal-lsp/|, |lib://drambiguity/|, |lib://salix-core|

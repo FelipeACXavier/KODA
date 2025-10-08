@@ -1,0 +1,100 @@
+capability BallLocator {
+  accepts: 
+    void locate() start when mission, 
+    void abort()  reset when idle
+
+  emits: 
+    void located(int pose) oncein mission
+}
+
+capability Drive {
+  accepts: 
+    void to_position(int pose) start, 
+    void abort()  reset when idle
+
+  emits: 
+    void in_position(int pose) oncein mission
+    void path_blocked() oncein mission
+}
+
+capability BallHandler {
+  bool with_ball = false
+
+  accepts:
+    void grab() 
+      start 
+    void release() 
+      start,
+    void abort() 
+      reset 
+      when idle,
+    bool has_ball() 
+      reply with_ball always
+
+  emits:
+    void grabbed() 
+      oncein mission with_ball = true
+    void released()
+      oncein mission with_ball = false
+}
+
+capability GetBall {
+  accepts: 
+    void get_ball()
+      start
+    void abort()
+      reset
+    void done()
+      reset
+  
+  emits: 
+    void got_ball()
+      oncein mission
+}
+
+task LocateBall { api pro GetBall, 
+                  handler req BallHandler, 
+                  locator req BallLocator } 
+{
+  trigger: locator.locate()
+  return: locator.located(pose)
+  abort: locator.abort()
+  tasks {
+    if handler.has_ball() {
+      api.got_ball()
+    } else {
+      trigger
+    }
+  }
+}
+
+task DriveToLocation {drive req Drive} 
+{
+  trigger: drive.to_position(pose)
+  return: drive.in_position(pose)
+  abort: drive.abort()
+}
+
+task HandleBall {handler req BallHandler} 
+{
+  trigger: handler.grab()
+  return: handler.grabbed()
+  abort: handler.abort()
+}
+
+task component GetBall {api pro GetBall, handler req BallHandler, locator req BallLocator, drive req Drive} {
+  bool with_ball = false
+
+  trigger: api.get_ball()
+
+  tasks {
+    LocateBall(api, handler, locator) -> 
+    DriveToLocation(drive) ->
+    HandleBall(handler) -> 
+    return
+  }
+
+  abort: api.abort()
+
+  return: api.got_ball()
+}

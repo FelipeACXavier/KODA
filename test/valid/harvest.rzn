@@ -1,0 +1,52 @@
+async task Drive(float x, float y) {
+  trigger: void to_position(float x, float y);
+  abort: void abort();
+  return: void in_position(float x, float y);
+  error: void path_blocked();
+}
+
+async task Harvester() {
+  trigger: void start();
+  abort: void abort();
+  return: void done();
+  error: void failed();
+}
+
+sync task Siren() {
+  accepts {
+    void start():
+      service: "/siren_start" "std_msgs::SirenControl";
+    void stop():
+      service: "/siren_stop" "std_msgs::SirenControl";
+  }
+}
+
+task component Harvest (drive req Drive, siren req Siren, harvester req Harvester,
+                       float x1, float y1, float x2, float y2) {
+  trigger: void start(float x1, float y1, float x2, float y2);
+  return: void done();
+  abort: void abort();
+  error: void failed();
+
+  vars {
+    float x1_ = x1 : 0.0
+    float y1_ = y1 : 0.0
+    float x2_ = x2 : 0.0
+    float y2_ = y2 : 0.0
+  }
+
+  strategy {
+    err: siren.start() --> end;
+
+    drv_abrt: harvester.abort() --> end; 
+    drv_err: harvester.abort() --> err;
+    driving: repeat(
+      (drive(x1_, y1_) on error drv_err on abort drv_abrt) --> 
+        (drive(x2_, y2_) on error drv_err on abort drv_abrt));
+
+    hrv_err: drive.abort() --> err;
+    harvesting: (harvester() on error hrv_err) --> drive.abort() --> end;
+
+    main: siren.stop() --> join(harvesting | driving);
+  }
+}
