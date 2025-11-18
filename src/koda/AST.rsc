@@ -18,7 +18,7 @@ data Argument(loc src=|unknown:///|)
   ;
 
 data Flow(loc src=|unknown:///|)
-  = \flow(str id, Strategy strategy)
+  = \flow(str id, list[str] arguments, Strategy strategy)
   ;
 
 data EventStatement(loc src=|unknown:///|)
@@ -56,6 +56,8 @@ data RosDefStatement(loc src=|unknown:///|)
   | \return_block(EventDefStatement call)
   | \abort_block(EventDefStatement call)
   | \error_block(EventDefStatement call)
+  | \in_block(EventDefStatement call)
+  | \out_block(EventDefStatement call)
   ;
 
 data VariableStatement(loc src=|unknown:///|)

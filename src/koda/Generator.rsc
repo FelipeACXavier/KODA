@@ -94,6 +94,8 @@ void createExternalTypes()
 extern float $float$;
 extern int $int$;
 extern boolean $bool$;
+extern string $std::string$;
+extern pose $const geometry_msgs::msg::PoseStamped&$;
 ";
 
   writeFile(OUTPUT_DIR + EXTERNALS, output);
@@ -139,6 +141,10 @@ public Result generate(\var(str name), Env env)
   if (name in env)
     return <env, env[name]>;
 
+  if ("flow_args" in env && map[str, str] args := env["flow_args"] && name in args) {
+    return <env, args[name]>;
+  }
+
   if (name == "true" || name == "false")
     return <env, "$<name>$">;
 
@@ -147,7 +153,7 @@ public Result generate(\var(str name), Env env)
 
 public Result generate(\str_const(str val), Env env)
 {
-  return <env, "<val>">;
+  return <env, "$<val>$">;
 }
 
 public Result generate(\int_const(int val), Env env)
@@ -253,9 +259,23 @@ public Result generate(\disj(Expression lhs, Expression rhs), Env env)
 public tuple[NFAx,int] build(\task(EventStatement call, list[StrategyHandler] handlers), int next, Env env) {
   <lenv, a> = generate(call, env);
 
-  set[State] resets = {};
-  str arg = toString(call is \event_call ? env[lenv["member"]] : env[lenv["call"]]);
+  str arg = "";
+  if (call is \event_call) {
+    arg = env[lenv["member"]];
+  } else {
+    str name = "<lenv["call"]>";
+    if (name in env) {
+      arg = env[lenv["call"]];
+    } else if (map[str, Strategy] strategies := env["flows"] && name in strategies && map[str, list[str]] flowArgs := env["all_flow_args"]) {
+      env["flow_args"] = (a: val | <str a, str val> <- zip2(flowArgs[name], lenv["args"]));
+      return build(strategies[name], next, env);
+    } else {
+      throw "Unknown call: <lenv["call"]>";
+    }
+  }
+  // str arg = toString(call is \event_call ? env[lenv["member"]] : env[lenv["call"]]);
 
+  set[State] resets = {};
   if (TaskDef task := tenv[arg]) {
     if (task.ttype == "sync") {
       // --- SYNC: fire-and-forget: s --act--> fOK (no wait, no sigs)
@@ -317,16 +337,41 @@ public tuple[NFAx,int] build(\task(EventStatement call, list[StrategyHandler] ha
           resets += mxa.resets;
           n2 = n4;
         } else if (\emitter(EventStatement call, Strategy o_strat) := handler) {
+          bool stay = false;
+          if (\seq(Strategy body, \ref("continue")) := o_strat) {
+            stay = true;
+            o_strat = body;
+          }
+
           <mxa, n3> = build(o_strat, n2, env);
           ma = mxa.m;
           S += ma.S;
-          F += ma.F;
           T += ma.T;
           <lenv, a> = generate(call, env);
-          ma.T += { <w, sig(lenv["member"], lenv["call"], lenv["args"]), ma.s0> };
-          T += ma.T;
+
+          Label label = sig(lenv["member"], lenv["call"], lenv["args"]);
+
+          if (stay) {
+            // Handle & STAY in 'w':
+            // w --label--> ma.s0 --(ma.T)--> ma.F --eps--> w
+            if (ma.S == {}) {
+              T += { <w, label, w> };
+            } else {
+              T += { <w, label, ma.s0> };
+              for (f <- ma.F) {
+                T += { <f, eps(), w> };
+              }
+            }
+          } else {
+            T += { <w, label, ma.s0> };
+            F += ma.F;
+          }
+
           n2 = n3;
           resets += mxa.resets;
+
+          if (label notin WATCHED_EVENTS)
+            WATCHED_EVENTS += label;
         }
       }
 
@@ -465,8 +510,10 @@ private tuple[NFAx,int] build(\if_strat(Expression condition, Strategy t), int n
     b,
     tx.m.F,
     // tx.m.T + { <b, eps(), tx.m.s0> }
-    tx.m.T + { <b, act("if", [], ""), tx.m.s0> }
+    tx.m.T + { <b, act("if", [a], ""), tx.m.s0> }
   );
+
+  println(m);
 
   return < nfax(m, tx.resets), n2 >;
 }
@@ -570,39 +617,69 @@ private tuple[NFAx,int] build(\every(int period, Strategy body, list[StrategyHan
   lenv = env;
   for (handler <- hs) {
     if (\error(Strategy e_strat) := handler) {
+      <j, next> = fresh(next);
       <mxa, next> = build(e_strat, next, env);
       ma = mxa.m;
-      S += ma.S;
+      S += ma.S + j;
       F += ma.F;
       T += ma.T;
-      T += { <wait, sig(lenv["call"], "error", lenv["args"]), ma.s0> };
+      T += { <wait, sig(lenv["call"], "error", lenv["args"]), j>, <j, Lreset, ma.s0> };
       resets += mxa.resets;
     } else if (\abort(Strategy a_strat) := handler) {
       // compile the abort handler subflow
+      <j, next> = fresh(next);
       <mxa, next> = build(a_strat, next, env);
       ma = mxa.m;
 
       // abort gate: on api.abort, emit t.abort(), then enter handler
       <sA, wA, next> = fresh2(next);
 
-      S += ma.S + { sA, wA };
+      S += ma.S + { sA, wA, j };
       F += ma.F;
       T += ma.T
         + { <wait,  sig(API, env["abort_call"], env["abort_args"]), sA> }
         + { <sA, eps(), wA> }
-        + { <wA, eps(), ma.s0> };
+        + { <wA, eps(), j> }
+        + { <j, Lreset, ma.s0> };
 
       resets += mxa.resets;
     } else if (\emitter(EventStatement call, Strategy o_strat) := handler) {
+      <j, next> = fresh(next);
+
+      bool stay = false;
+      if (\seq(Strategy body, \ref("continue")) := o_strat) {
+        stay = true;
+        o_strat = body;
+      }
+
       <mxa, next> = build(o_strat, next, env);
       ma = mxa.m;
-      S += ma.S;
-      F += ma.F;
+      S += ma.S + j;
+      // F += ma.F;
       <lenv, a> = generate(call, env);
       Label label = sig(lenv["member"], lenv["call"], lenv["args"]);
-      T += ma.T + { <wait, label, ma.s0> };
 
-      WATCHED_EVENTS += label;
+      T += ma.T;
+      if (stay) {
+        if (ma.S == {}) {
+          T += { <wait, label, wait> };
+        } else {
+          // T += { <wait, label, ma.s0> };
+          T += { <wait, label, ma.s0> };
+          for (f <- ma.F) {
+            T += { <f, eps(), wait> };
+          }
+        }
+      } else {
+        T += { <wait, label, j>, <j, Lreset, ma.s0> };
+        F += ma.F;
+      }
+
+      // T += ma.T + { <wait, label, j>, <j, Lreset, ma.s0> };
+
+      if (label notin WATCHED_EVENTS)
+        WATCHED_EVENTS += label;
+
       resets += mxa.resets;
     }
   }
@@ -698,6 +775,8 @@ public tuple[map[int,list[OutCall]], map[int,int]] entryPlan(DFAI dFull, Env env
       case act(str n, list[str] as, str ret): {
         if (n == "guard") {
           return mcall(n, "guard", as, ret);
+        } else if (n == "if") {
+          return mcall(n, "if", as, ret);
         }
 
         str meth = tenv[env[n]].trigger.name;
@@ -824,6 +903,8 @@ private list[OutCall] pickCanonicalCalls(list[int] bFs, map[int,list[OutCall]] e
 }
 
 public EventCall applyTpl(EventTpl t, list[str] actuals) {
+  println(t);
+  println(actuals);
   map[str,str] sub = ( t.args[i] : actuals[i] | i <- [0 .. size(t.args)] );
   list[str] out = [ (a in sub) ? sub[a] : a | a <- t.args ];
   return ecall(t.name, out);
@@ -890,6 +971,8 @@ private str emitOutCall(OutCall c, Env env) {
       if (t == "guard") {
         assert size(as) == 1;
         return "if (!(<as[0]>)) illegal";
+      } else if (t == "if") {
+        return "if (<as[0]>) {";
       }
 
       TaskDef td = tenv[env[t]];
@@ -1014,9 +1097,11 @@ public tuple[DFAI, map[int,int]] projectToWaitDFAWithMap(DFAI dFull) {
 
 public str emitBehaviorWait(DFAI dFull, DFAI dWait, map[int,int] full2wait, Env env) {
   // Plan immediate calls on FULL graph
+  println("Getting entry plan");
   <entryCalls, _> = entryPlan(dFull, env);
 
   // Names on projected wait-only DFA
+  println("Getting dezyne names");
   map[int,str] names = dezyneStateNames(dWait);
 
   // Emit one handler per projected sig-edge
@@ -1049,6 +1134,7 @@ public str emitBehaviorWait(DFAI dFull, DFAI dWait, map[int,int] full2wait, Env 
                   });
 
     bool hasStart = false;
+    list[Label] signals = [];
     for (<int _, Label lSig, int dstW> <- sigOut) {
       // collect all FULL candidates that normalize to this projected edge
       list[int] bFs = candidateTargetsForEdge(dFull, full2wait, sW, lSig, dstW);
@@ -1069,7 +1155,8 @@ public str emitBehaviorWait(DFAI dFull, DFAI dWait, map[int,int] full2wait, Env 
 
         if (c == "api") {
           apiCall = true;
-          if (ev == env["trigger_call"]) hasStart = true;
+          if (ev == env["trigger_call"])
+            hasStart = true;
         }
       }
 
@@ -1078,7 +1165,7 @@ public str emitBehaviorWait(DFAI dFull, DFAI dWait, map[int,int] full2wait, Env 
         out += "        <emitOutCall(oc, env)>;\n";
 
       // Make sure the top level also gets the call
-      if (!is_success && "error_call" in env)
+      if (!is_success && "error_call" in env && dstW == 0)
         out += "        <API>.<env["error_call"]>(<if ("error_args" in env){><ppArgs(env["error_args"])><}>);\n";
 
       if (is_success && !apiCall &&
@@ -1088,19 +1175,22 @@ public str emitBehaviorWait(DFAI dFull, DFAI dWait, map[int,int] full2wait, Env 
       if (dstW != sW)
         out += "        state = State." + names[dstW] + ";\n";
 
+      signals += lSig;
       out += "      }\n";
+    }
+
+    for (label <- WATCHED_EVENTS) {
+      if (label in signals)
+        continue;
+
+      <watchedSignal, _> = emitSignal(label, env);
+      out += "      <watchedSignal> {}\n";
     }
 
     // Define what is allowed in the other states for the provided port
     if (sW == 0) {
       if ("abort_call" in env)
         out += "      on <API>.<env["abort_call"]>(<if ("abort_args" in env){><ppArgs(env["abort_args"])><}>): {}\n";
-
-      for (label <- WATCHED_EVENTS) {
-        <watchedSignal, _> = emitSignal(label, env);
-        out += "      <watchedSignal> {}\n";
-      }
-
     } else {
       if (!hasStart)
         out += "      on <API>.<env["trigger_call"]>(<if ("trigger_args" in env){><ppArgs(env["trigger_args"])><}>): {}\n";
@@ -1183,6 +1273,42 @@ public Result generate(\error_block(EventDefStatement call), Env env)
   return <env, "">;
 }
 
+public Result generate(\in_block(EventDefStatement call), Env env)
+{
+  map[str,EventTpl] evs = ();
+  map[str, str] dependencies = ();
+
+  if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] _) := call) {
+    evs[id] = \etpl(id, [a | arg <- arguments, <_, str a> := generate(arg, env)], ret);
+    if ("accepts" notin env)
+      env["accepts"] = evs;
+    else if (map[str,EventTpl] accepts := env["accepts"])
+      env["accepts"] = accepts + evs;
+
+    // env["accepts_dep"] = dependencies;
+  }
+
+  return <env, "">;
+}
+
+public Result generate(\out_block(EventDefStatement call), Env env)
+{
+  map[str,EventTpl] evs = ();
+  map[str, str] dependencies = ();
+
+  if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] _) := call) {
+    evs[id] = \etpl(id, [a | arg <- arguments, <_, str a> := generate(arg, env)], ret);
+    if ("emits" notin env)
+      env["emits"] = evs;
+    else if (map[str,EventTpl] emits := env["emits"])
+      env["emits"] = emits + evs;
+
+    // env["emits_dep"] = dependencies;
+  }
+
+  return <env, "">;
+}
+
 // ============================================================
 // Statement
 public Result generate(\action(str topic, str msg, list[RosDefStatement] events), Env env)
@@ -1219,10 +1345,13 @@ public Result generate(\tasks_block(list[Flow] flows), Env env) {
 
   println("================== Non-main flows =======================");
   map[str, Strategy] fenv = ();
-  for (flow <- flows, \flow(str name, Strategy strat) := flow) {
+  map[str, list[str]] fenvArgs = ();
+  for (flow <- flows, \flow(str name, list[str] args, Strategy strat) := flow) {
     fenv[name] = strat;
+    fenvArgs[name] = args;
   }
   env["flows"] = fenv;
+  env["all_flow_args"] = fenvArgs;
 
   println("================== Main flows =======================");
   println("================== NFA =======================");
@@ -1233,10 +1362,12 @@ public Result generate(\tasks_block(list[Flow] flows), Env env) {
   println("================== DFA =======================");
   DFA dm = determinize(na);
   dm = minimise(dm);
+  // println(toPlantUML(dm));
 
   println("================== DFAI =======================");
   <diFull, idx> = reindexDFAReachable(dm);
 
+  println("Projecting DFA");
   <diWait, full2wait > = projectToWaitDFAWithMap(diFull);
   println(toPlantUML(diWait));
   output = emitBehaviorWait(diFull, diWait, full2wait, env);

@@ -41,13 +41,22 @@ keyword Keywords
     | "join"
     | "either"
     | "on error"
-    | "on abort  "
+    | "on abort"
     ;
 
 lexical Natural = [0-9]+ !>> [0-9];
 lexical Real = [0-9]+[.][0-9]+ !>> [0-9];
 lexical Ident = ([a-zA-Z_\-:$][a-zA-Z0-9_\-:$]* !>> [a-zA-Z0-9_\-$]) \ Keywords;
-lexical String = "\"" ![\"]* "\"";
+lexical UnicodeEscape
+    = utf16: "\\" [u] [0-9 A-F a-f] [0-9 A-F a-f] [0-9 A-F a-f] [0-9 A-F a-f]
+    | utf32: "\\" [U] [0-9 A-F a-f] [0-9 A-F a-f] [0-9 A-F a-f] [0-9 A-F a-f] [0-9 A-F a-f] [0-9 A-F a-f]
+    ;
+lexical StringChar
+    = ![\" \\]                 // " or \ are invalid unless they are preceed by \
+    | "\\" [\" \\ / b f n r t] // Thus, these are valid \" \\ \/ \b \f \n \r \t
+    | UnicodeEscape
+    ;
+lexical String = "\"" StringChar* "\"";
 lexical Any = "\<(" ![$]* ")\>";
 
 start syntax System
@@ -66,7 +75,7 @@ syntax Argument
   ;
 
 syntax Flow
-  = \flow: Ident ":" Strategy ";"
+  = \flow: Ident ("[" {Ident ","}* "]")? ":" Strategy ";"
   ;
 
 syntax EventStatement
@@ -111,12 +120,14 @@ syntax RosDefStatement
   | \return_block: "return" ":" EventDefStatement call ";"
   | \abort_block: "abort" ":" EventDefStatement call ";"
   | \error_block: "error" ":" EventDefStatement call ";"
+  | \in_block: "in" ":" EventDefStatement call ";"
+  | \out_block: "out" ":" EventDefStatement call ";"
   ;
 
 syntax VariableStatement
   = \variable_def: Ident var_type Ident var_name "=" Expression ":" Expression
   ;
-  
+
 syntax Statement
   = @Foldable \tasks_block: "strategy" "{" Flow+ "}"
   > @Foldable \variables: "vars" "{" VariableStatement+ "}"

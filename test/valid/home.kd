@@ -1,0 +1,71 @@
+capability Bridge(string zone) {
+  service "/poll" ""{
+    in: void poll(string scene);
+  }
+}
+
+capability Co2Sensor() {    
+  service "co2/normal" ""{
+    out: void normal();
+  }
+  service "co2/high" ""{
+    out: void high();
+  }
+}
+
+capability EnvSensor() {
+  service "environment/empty" "" {
+    out: void empty();
+  }
+  service "environment/present" "" {
+    out: void present();
+  }
+}
+
+capability Lighting(string scene) {
+  service "lighting/scene" "{ \"cmd:\" \"scene\" }" {
+    in: void set(string scene);
+  }
+}
+
+capability Ventilation(boolean up) {
+    action "ventilation" "{ \"cmd:\" \"up\" }" {
+      trigger: void solve(boolean up);
+      return: void done();
+      abort: void stop();
+      error: void failed();
+    }
+}
+
+task AirQuality (bridge req Bridge, sensor req Co2Sensor, environ req EnvSensor, 
+                 light req Lighting, hvac req Ventilation, string zone)
+{
+  trigger: void start(string zone);
+  return:  void done();
+  abort:   void abort();
+  error:   void failed();
+
+  vars {
+    string zone_ = zone : "zone1"
+    int count_ = 0 : 0
+  }
+
+  strategy {
+    err:  hvac.abort() --> light.set("Alert") --> end;
+    abrt: hvac.abort() --> end;
+
+    ventilation [mode]: within 300 do ( hvac(mode)
+          on error err
+          on abort abrt
+          on environ.present() ( light.set("On") --> continue )
+          on environ.empty() ( light.set("Off") --> continue )
+        ) else err;
+
+    main: every 10 { bridge.poll(zone_) }
+      // on abort ( abrt )
+      on environ.present() ( light.set("On") )
+      on environ.empty() ( light.set("Off") )
+      on sensor.high() ( ventilation(true) )
+      on sensor.normal() ( ventilation(false) );
+  }
+}

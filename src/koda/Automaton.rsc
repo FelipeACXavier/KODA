@@ -143,7 +143,7 @@ public set[State] reachFrom(State s0, Edge T) {
   while (!isEmpty(todo)) {
     State x = head(todo);
     todo = tail(todo);
-    for (<State a, Label l, State y> <- T) {
+    for (<State a, Label _, State y> <- T) {
       if (a == x && !(y in seen)) {
         seen += {y};
         todo += [y];

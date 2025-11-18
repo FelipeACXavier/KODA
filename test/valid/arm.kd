@@ -1,0 +1,79 @@
+capability Conveyor() {
+  action "/arm_" "float"{
+    trigger:  void move();
+    abort:    void stop();
+    return:   void done();
+    error:    void failed();
+  }
+}
+
+capability RobotArm(string pick) {
+  action "/arm_" "float"{
+    trigger:  void act(string pick);
+    abort:    void stop();
+    return:   void done();
+    error:    void failed();
+  }
+}
+
+// capability ImageInspector() {
+//  action "level${id}" "float"{
+//    trigger: void inspect();
+//     abort: void stop();
+//    return: void success();
+//    error: void failed();
+//  }
+// }
+
+capability ImageInspector() {
+  service "/conveyor_start" "float"{
+    in: void start();
+  }
+  service "/conveyor_start" "float"{
+    in: void stop();
+  }
+  service "/conveyor_start" "float"{
+    out: void invalid();
+  }
+}
+
+capability SensorModule() {
+  service "/conveyor_start" "float"{
+    in: void poll();
+  }
+}
+
+capability Ticket() {
+  service "/conveyor_start" "float"{
+    in: void create();
+  }
+}
+
+task QualityCheckCell(arm req RobotArm, conveyor req Conveyor, 
+                      image req ImageInspector, ticket req Ticket) {
+  trigger: void start();
+  return:  void done();
+  abort:   void abort();
+  error:   void failed();
+
+  strategy {
+    abrt: conveyor.stop() --> image.stop() -->
+      arm.stop() --> end;
+
+    reject: ( arm("reject_location")
+      on error abrt
+      on abort abrt ) --> ticket.create();
+
+    detected: conveyor.stop() -->
+      ( arm("pick_location")
+        on error abrt
+        on abort abrt ) --> reject;
+
+    main: repeat( image.start() -->
+      ( conveyor()
+        on error abrt
+        on abort abrt
+        on image.invalid() detected )
+    );
+  }
+}

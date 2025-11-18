@@ -14,12 +14,6 @@ alias Result = tuple[Env, value];
 Env genv = ();
 Env ACTIONS = ();
 
-data EventTpl = etpl(str name, list[str] args, str ret);
-data TaskDef   = taskDef(
-  str name,
-  list[EventTpl] ins,
-  list[EventTpl outs]);
-
 loc OUTPUT_DIR = |project://koda/generated/|;
 str CLASS_NAME = "Supervisor";
 
@@ -127,7 +121,7 @@ private Result generate(str caller, \ros_event(str comm, str topic, str msg), st
 
       // Convert arguments to message
       implementation += "<clean(msg)> goal_msg;\n";
-      
+
       // Message specific stuff
       implementation += "goal_msg.pose.header.stamp = std::chrono_literals::now();\n";
       implementation += "goal_msg.pose.header.frame_id = \"map\";\n";
@@ -161,7 +155,7 @@ private Result generate(str caller, \ros_event(str comm, str topic, str msg), st
       implementation += "    rclcpp::shutdown();\n";
       implementation += "  };\n";
       implementation += "goal_future_ = action_client_-\>async_send_goal(goal_msg, send_goal_options);\n";
-      
+
       env["supervisor_members"] += "rclcpp_action::Client\<<clean(msg)>\>::SharedFuture goal_future_;\n";
 
     } else if (inputType == "abort") {
@@ -204,7 +198,7 @@ public Result generate(str caller, \trigger_block(EventDefStatement call), Env e
 
     if (str def := env["supervisor_definitions"])
       env["supervisor_definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>);\n";
-    
+
     if (str def := env["definitions"])
       env["definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>) override;\n";
 
@@ -393,8 +387,6 @@ public Result generate(\task(str id, list[Argument] args, list[Statement] tstate
   env["members"] = "";
   env["constructor"] = "";
   env["implementations"] = "";
-
-  // TaskDef task = taskDef(id, [], []);
 
   for (s <- tstatements) {
     <env, _> = generate(id, s, env);

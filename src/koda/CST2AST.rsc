@@ -23,6 +23,7 @@ real loadBasic(Real v) = toReal("<v>");
 
 str loadBasic(Time v) = "<v>";
 str loadBasic(When v) = "<v>";
+str loadBasic(ROSData v) = "<v>";
 // str loadBasic(TaskType v) = "<v>";
 // str loadBasic(TaskEnd v) = "<v>";
 
@@ -119,7 +120,10 @@ EventStatement loadEventStatement((EventStatement)`<Ident event> ( <{Expression 
 // ============================================================
 // Flow
 Flow loadFlow((Flow)`<Ident id> : <Strategy strategy> ;`)
-  = \flow(loadBasic(id), loadStrategy(strategy), src=id@\loc);
+  = \flow(loadBasic(id), [], loadStrategy(strategy), src=id@\loc);
+
+Flow loadFlow((Flow)`<Ident id> [<{Ident ","}* args>] : <Strategy strategy> ;`)
+  = \flow(loadBasic(id), [loadBasic(arg) | arg <- args], loadStrategy(strategy), src=id@\loc);
 
 // ============================================================
 // Strategy handlers
@@ -189,6 +193,12 @@ RosDefStatement loadRosDefStatement((RosDefStatement)`abort: <EventDefStatement 
 
 RosDefStatement loadRosDefStatement((RosDefStatement)`error: <EventDefStatement call> ;`)
   = \error_block(loadEventDefStatement(call), src=call@\loc);
+
+RosDefStatement loadRosDefStatement((RosDefStatement)`in: <EventDefStatement call> ;`)
+  = \in_block(loadEventDefStatement(call), src=call@\loc);
+
+RosDefStatement loadRosDefStatement((RosDefStatement)`out: <EventDefStatement call> ;`)
+  = \out_block(loadEventDefStatement(call), src=call@\loc);
 
 // Capability
 EventDefStatement loadEventDefStatement((EventDefStatement)`<Ident return_type> <Ident id> ( <{Argument ","}* args> ) : <{EventDefComponent ","}+ components>`)

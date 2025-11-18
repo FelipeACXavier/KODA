@@ -37,17 +37,7 @@
      <dependency>
       <groupId>org.rascalmpl</groupId>
       <artifactId>rascal-lsp</artifactId>
-      <version>2.21.0</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.rascalmpl</groupId>
-          <artifactId>typepal</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.rascalmpl</groupId>
-          <artifactId>rascal-core</artifactId>
-        </exclusion>
-      </exclusions>
+      <version>2.22.0-RC2</version>
     </dependency>
       <dependency>
       <groupId>org.rascalmpl</groupId>
@@ -77,22 +67,36 @@
     </resources>
     <plugins>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.8.0</version>
+        <configuration>
+          <compilerArgument>-parameters</compilerArgument>
+          <release>11</release>
+        </configuration>
+      </plugin>
+      <plugin>
         <groupId>org.rascalmpl</groupId>
         <artifactId>rascal-maven-plugin</artifactId>
-        <version>0.15.4</version>
+        <version>0.30.0-RC26</version>
         <configuration>
-          <errorsAsWarnings>true</errorsAsWarnings>
-          <bin>${project.build.directory}/classes</bin>
+          <bin>${project.build.outputDirectory}</bin>
           <srcs>
             <src>${project.basedir}/src</src>
           </srcs>
           <srcIgnores>
             <ignore>${project.basedir}/src/examples</ignore>
+            <ignore>${project.basedir}/src/koda/Plugin.rsc</ignore>
           </srcIgnores>
-          <enableStandardLibrary>false</enableStandardLibrary>
-          <mainModule>koda::Plugin</mainModule>
+
+          <parallel>true</parallel>
+          <errorsAsWarnings>false</errorsAsWarnings>
+          <enableStandardLibrary>true</enableStandardLibrary>
+
+          <mainModule>Main</mainModule>
+          <args>${rascal.args}</args>
         </configuration>
-        <executions>
+        <!-- <executions>
             <execution>
               <id>it-compile</id>
               <phase>compile</phase>
@@ -107,7 +111,7 @@
                 <goal>package</goal>
               </goals>
             </execution>
-          </executions>
+          </executions> -->
       </plugin>
     </plugins>
   </build>
