@@ -10,18 +10,19 @@ import koda::Generator;
 
 int main(list[str] args){
   // By default, generate the valid tests
-  if (size(args) != 1) {
-    println("No argument provided");
+  if (size(args) != 2) {
+    println("Not enough arguments provided");
     return -1;
   }
 
-  loc input = |project://koda/test/valid/| + args[0];
-  loc output = |project://koda/generated/| + Location::locFromUnixPath(args[0]).filename;
+  for (arg <- args) println("Args: <arg>");
+
+  loc input = locFromUnixPath("<args[0]>");
+  loc output = locFromUnixPath("<args[1]>");
 
   println(input);
   println(output);
 
   // Generate test files
-  // return koda::Generator::generate();
-  return 0;
+  return koda::Generator::generate(input, output);
 }

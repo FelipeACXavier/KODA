@@ -32,22 +32,12 @@
     <dependency>
       <groupId>org.rascalmpl</groupId>
       <artifactId>rascal</artifactId>
-      <version>0.40.17</version>
-    </dependency>
-     <dependency>
-      <groupId>org.rascalmpl</groupId>
-      <artifactId>rascal-lsp</artifactId>
-      <version>2.22.0-RC2</version>
-    </dependency>
-      <dependency>
-      <groupId>org.rascalmpl</groupId>
-      <artifactId>salix-core</artifactId>
-      <version>0.2.7</version>
+      <version>0.41.0-RC49</version>
     </dependency>
     <dependency>
       <groupId>org.rascalmpl</groupId>
-      <artifactId>drambiguity</artifactId>
-      <version>0.3.5</version>
+      <artifactId>rascal-lsp</artifactId>
+      <version>2.22.0-RC2</version>
     </dependency>
   </dependencies>
 
@@ -74,44 +64,6 @@
           <compilerArgument>-parameters</compilerArgument>
           <release>11</release>
         </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.rascalmpl</groupId>
-        <artifactId>rascal-maven-plugin</artifactId>
-        <version>0.30.0-RC26</version>
-        <configuration>
-          <bin>${project.build.outputDirectory}</bin>
-          <srcs>
-            <src>${project.basedir}/src</src>
-          </srcs>
-          <srcIgnores>
-            <ignore>${project.basedir}/src/examples</ignore>
-            <ignore>${project.basedir}/src/koda/Plugin.rsc</ignore>
-          </srcIgnores>
-
-          <parallel>true</parallel>
-          <errorsAsWarnings>false</errorsAsWarnings>
-          <enableStandardLibrary>true</enableStandardLibrary>
-
-          <mainModule>Main</mainModule>
-          <args>${rascal.args}</args>
-        </configuration>
-        <!-- <executions>
-            <execution>
-              <id>it-compile</id>
-              <phase>compile</phase>
-              <goals>
-                <goal>compile</goal>
-              </goals>
-            </execution>
-            <execution>
-              <id>it-package</id>
-              <phase>prepare-package</phase>
-              <goals>
-                <goal>package</goal>
-              </goals>
-            </execution>
-          </executions> -->
       </plugin>
     </plugins>
   </build>
