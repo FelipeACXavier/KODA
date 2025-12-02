@@ -513,7 +513,7 @@ private tuple[NFAx,int] build(\if_strat(Expression condition, Strategy t), int n
     tx.m.T + { <b, act("if", [a], ""), tx.m.s0> }
   );
 
-  println(m);
+  // println(m);
 
   return < nfax(m, tx.resets), n2 >;
 }
@@ -903,8 +903,8 @@ private list[OutCall] pickCanonicalCalls(list[int] bFs, map[int,list[OutCall]] e
 }
 
 public EventCall applyTpl(EventTpl t, list[str] actuals) {
-  println(t);
-  println(actuals);
+  // println(t);
+  // println(actuals);
   map[str,str] sub = ( t.args[i] : actuals[i] | i <- [0 .. size(t.args)] );
   list[str] out = [ (a in sub) ? sub[a] : a | a <- t.args ];
   return ecall(t.name, out);
