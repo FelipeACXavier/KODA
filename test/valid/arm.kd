@@ -57,17 +57,16 @@ task QualityCheckCell(arm req RobotArm, conveyor req Conveyor,
   error:   void failed();
 
   strategy {
-    abrt: conveyor.stop() --> image.stop() -->
-      arm.stop() --> end;
+    abrt: conveyor.stop() --> image.stop() --> arm.stop() --> end;
 
     reject: ( arm("reject_location")
-      on error abrt
-      on abort abrt ) --> ticket.create();
+              on error abrt
+              on abort abrt ) --> ticket.create();
 
     detected: conveyor.stop() -->
-      ( arm("pick_location")
-        on error abrt
-        on abort abrt ) --> reject;
+        ( arm("pick_location")
+          on error abrt
+          on abort abrt ) --> reject;
 
     main: repeat( image.start() -->
       ( conveyor()

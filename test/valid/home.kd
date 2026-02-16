@@ -62,7 +62,7 @@ task AirQuality (bridge req Bridge, sensor req Co2Sensor, environ req EnvSensor,
         ) else err;
 
     main: every 10 { bridge.poll(zone_) }
-      // on abort ( abrt )
+      on abort ( abrt )
       on environ.present() ( light.set("On") )
       on environ.empty() ( light.set("Off") )
       on sensor.high() ( ventilation(true) )
