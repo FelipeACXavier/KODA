@@ -15,25 +15,26 @@ import Boolean;
 
 // =============================================================
 // Data formats
-data TaskData
-  = \task_data(str trigger, list[str] trigger_call,
-               str success, list[str] success_call,
-               str abort, list[str] abort_call,
-               str error, list[str] error_call);
+data EventTpl
+  = etpl(str name, list[str] args, str ret)
+  | empty_etpl()
+  ;
 
-data EventTpl  = etpl(str name, list[str] args, str ret) | empty_etpl();
-data EventCall = ecall(str name, list[str] args);
-data TaskDef   = taskDef(
+data EventCall
+  = ecall(str name, list[str] args)
+  ;
+
+data TaskDef = taskDef(
   str name, list[str] formals, str ttype,
   EventTpl trigger,
   EventTpl onReturn, EventTpl onError, EventTpl onAbort,
   map[str,EventTpl] accepts, map[str,EventTpl] emits
 );
 
-alias Env = map[str, value];
+// alias Env = map[str, value];
 alias CEnv = map[str, TopLevelComponent];
 alias TaskEnv = map[str, TaskDef];
-alias Result = tuple[Env, value];
+// alias Result = tuple[Env, value];
 
 // =============================================================
 // Globals
@@ -2039,12 +2040,12 @@ public int generate(koda::AST::System system)
 
 public int generate(loc source, loc output_dir)
 {
-  OUTPUT_DIR = output_dir;
+  OUTPUT_DIR = output_dir + "/models";
 
   src = koda::Parser::parsekoda(source);
   ast = koda::CST2AST::cst2ast(src);
 
-  // koda::ROSGenerator::generate(ast, OUTPUT_DIR);
+  koda::ROSGenerator::generate(ast, output_dir + "/ros");
 
   return generate(ast);
 }

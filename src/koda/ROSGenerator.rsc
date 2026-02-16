@@ -7,435 +7,759 @@ import koda::CST2AST;
 import IO;
 import List;
 import String;
+import vis::Text;
 
-alias Env = map[str, str];
+alias Env = map[str, value];
 alias Result = tuple[Env, value];
 
-Env genv = ();
-Env ACTIONS = ();
+// This represents a single dezyne call
+data CallTpl
+  = ctpl(str name, list[Argument] arguments, str ret)
+  | empty_ctpl()
+  ;
 
-loc OUTPUT_DIR = |project://koda/generated/|;
+// These represent a capability, for example, for action, topic, or service
+data CapabilityDef = capDef(
+  str name, str ttype, str msg,
+  CallTpl trigger,
+  CallTpl onReturn,
+  CallTpl onError,
+  CallTpl onAbort
+);
+
+data CapabilityData
+  = capData(str includes, str members, str methods, str parameters, str constructor, str startUp)
+  | empty_data()
+  ;
+
+loc INCLUDE_DIR = |project://koda/generated/include|;
+loc SRC_OUTPUT_DIR = |project://koda/generated/source|;
 str CLASS_NAME = "Supervisor";
+
+// =============================================================
+// Capability nodes
+public CapabilityData generateInitialPose(str key, CapabilityDef cap)
+{
+  str includes = "";
+  str members = "";
+  str methods = "";
+  str parameters = "";
+  str constructor = "";
+  str startUp = "";
+
+  // ======================================================================================================
+  // Includes - These are the necessary headers
+  includes += "// InitialPose ========================================================================== \n";
+  includes += "#include \<geometry_msgs/msg/pose_with_covariance_stamped.hpp\>\n";
+
+  // ======================================================================================================
+  // Members - These are the members needed for this capability
+  members += "  // InitialPose ========================================================================== \n";
+  members += "  std::atomic\<bool\> got_amcl_pose_{false};\n";
+  members += "  rclcpp::Publisher\<geometry_msgs::msg::PoseWithCovarianceStamped\>::SharedPtr initialpose_pub_;\n";
+  members += "  rclcpp::Subscription\<geometry_msgs::msg::PoseWithCovarianceStamped\>::SharedPtr amcl_pose_sub_;\n\n";
+
+  // ======================================================================================================
+  // Constructor - These are the actions necessary for the correct construction of this capability
+  constructor += "  initialpose_pub_ = create_publisher\<geometry_msgs::msg::PoseWithCovarianceStamped\>(\"/initialpose\", 10);\n";
+  constructor += "  amcl_pose_sub_ = create_subscription\<geometry_msgs::msg::PoseWithCovarianceStamped\>(\"/amcl_pose\", 10,\n";
+  constructor += "   [this](const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr) {\n";
+  constructor += "      got_amcl_pose_.store(true);\n";
+  constructor += "      auto tmp = amcl_pose_sub_;\n";
+  constructor += "      amcl_pose_sub_.reset();\n";
+  constructor += " }, options);\n\n";
+
+  // ======================================================================================================
+  // Parameters - These are the paramaters needed for this capability
+  parameters += "  // InitialPose ========================================================================== \n";
+  parameters += "  declare_parameter\<bool\>(\"from_start\", true);\n";
+  parameters += "  declare_parameter\<std::string\>(\"map_frame\", \"map\");\n";
+  parameters += "  declare_parameter\<double\>(\"initial_x\", 0.0);\n";
+  parameters += "  declare_parameter\<double\>(\"initial_y\", 0.0);\n";
+  parameters += "  declare_parameter\<double\>(\"initial_yaw\", 0.0);\n\n";
+
+  // ======================================================================================================
+  // Start - Here we add any start up actions needed by this capability
+
+  // ======================================================================================================
+  // Methods - Here we add any methods that this capability might add to the supervisor
+  methods += "void <CLASS_NAME>::<key>Trigger()\n";
+  methods += "{\n";
+  methods += "  const auto map_frame = get_parameter(\"map_frame\").as_string();\n";
+  methods += "  const double x = get_parameter(\"initial_x\").as_double();\n";
+  methods += "  const double y = get_parameter(\"initial_y\").as_double();\n";
+  methods += "  const double yaw = get_parameter(\"initial_yaw\").as_double();\n\n";
+
+  methods += "  geometry_msgs::msg::PoseWithCovarianceStamped msg;\n";
+  methods += "  msg.header.stamp = now();\n";
+  methods += "  msg.header.frame_id = map_frame;\n";
+  methods += "  msg.pose.pose.position.x = x;\n";
+  methods += "  msg.pose.pose.position.y = y;\n";
+  methods += "  msg.pose.pose.position.z = 0.0;\n\n";
+
+  methods += "  tf2::Quaternion q;\n";
+  methods += "  q.setRPY(0, 0, yaw);\n";
+  methods += "  msg.pose.pose.orientation = tf2::toMsg(q);\n\n";
+
+  methods += "  const double var_xy = 0.25 * 0.25;\n";
+  methods += "  const double var_yaw = (10.0 * M_PI / 180.0) * (10.0 * M_PI / 180.0);\n";
+  methods += "  for (double& c : msg.pose.covariance)\n";
+  methods += "    c = 0.0;\n";
+  methods += "  msg.pose.covariance[0] = var_xy;\n";
+  methods += "  msg.pose.covariance[7] = var_xy;\n";
+  methods += "  msg.pose.covariance[35] = var_yaw;\n\n";
+
+  methods += "  RCLCPP_INFO(get_logger(), \"Publishing initial pose at (%.2f, %.2f, yaw=%.2f rad) in %s.\", x, y, yaw, map_frame.c_str());\n";
+  methods += "  for (int i = 0; i \< 10; ++i) {\n";
+  methods += "    msg.header.stamp = now();\n";
+  methods += "    initialpose_pub_-\>publish(msg);\n";
+  methods += "    rclcpp::sleep_for(std::chrono::milliseconds(100));\n";
+  methods += "  }\n\n";
+
+  methods += "  auto deadline = now() + rclcpp::Duration::from_seconds(2.0);\n";
+  methods += "  while (!got_amcl_pose_.load() && now() \< deadline) {\n";
+  methods += "    rclcpp::sleep_for(std::chrono::milliseconds(50));\n";
+  methods += "  }\n\n";
+
+  methods += "  if (got_amcl_pose_.load()) {\n";
+  methods += "    RCLCPP_INFO(get_logger(), \"AMCL pose received after initialpose publish.\");\n";
+  methods += "    if (<key>_position_set)\n";
+  methods += "      <key>_position_set();\n";
+  methods += "  } else {\n";
+  methods += "    RCLCPP_WARN(get_logger(), \"No /amcl_pose observed yet; continuing anyway.\");\n";
+  methods += "    if (<key>_failed)\n";
+  methods += "      <key>_failed();\n";
+  methods += "  }\n";
+  methods += "}\n";
+
+  return capData(includes, members, methods, parameters, constructor, startUp);
+}
+
+public CapabilityData generateDrive(str key, CapabilityDef cap)
+{
+  str includes = "";
+  str members = "";
+  str methods = "";
+  str parameters = "";
+  str constructor = "";
+  str startUp = "";
+
+  // ======================================================================================================
+  // Includes - These are the necessary headers
+  includes += "// Drive ========================================================================== \n";
+  includes += "#include \<nav2_msgs/action/navigate_to_pose.hpp\>\n";
+  includes += "#include \<nav_msgs/msg/odometry.hpp\>\n";
+
+  // ======================================================================================================
+  // Members - These are the members needed for this capability
+  members += "  // Drive ========================================================================== \n";
+  members += "  rclcpp_action::Client\<nav2_msgs::action::NavigateToPose\>::SharedPtr nav_client_;\n\n";
+
+  // ======================================================================================================
+  // Constructor - These are the actions necessary for the correct construction of this capability
+  // TODO: Callback groups should be passed to the capability template
+  constructor += "  // Drive ========================================================================== \n";
+  constructor += "  nav_client_ = rclcpp_action::create_client\<nav2_msgs::action::NavigateToPose\>(this, \"navigate_to_pose\", cbg_);\n\n";
+
+  // ======================================================================================================
+  // Parameters - These are the paramaters needed for this capability
+  parameters += "  // Drive ========================================================================== \n";
+  parameters += "  declare_parameter\<std::string\>(\"map_frame\", \"map\");\n\n";
+
+  // ======================================================================================================
+  // Start - Here we add any start up actions needed by this capability
+  startUp += "  if (!nav_client_-\>wait_for_action_server(5s)) {\n";
+  startUp += "    RCLCPP_ERROR(get_logger(), \"Nav2 \'navigate_to_pose\' action not available.\");\n";
+  startUp += "    rclcpp::shutdown();\n";
+  startUp += "    return;\n";
+  startUp += "  }\n\n";
+
+  // ======================================================================================================
+  // Methods - Here we add any methods that this capability might add to the supervisor
+  if (ctpl(str _, list[Argument] _, str ret) := cap.trigger)
+  {
+    methods += "  // Drive ========================================================================== \n";
+    methods += "<ret> <CLASS_NAME>::<key>Trigger(float x, float y, float yaw)\n";
+    methods += "{\n";
+    methods += "  auto frame_id = get_parameter(\"map_frame\").as_string();\n";
+    methods += "  auto goal_msg = nav2_msgs::action::NavigateToPose::Goal();\n";
+    methods += "  goal_msg.pose.header.stamp = now();\n";
+    methods += "  goal_msg.pose.header.frame_id = frame_id;\n";
+    methods += "  goal_msg.pose.pose.position.x = x;\n";
+    methods += "  goal_msg.pose.pose.position.y = y;\n\n";
+
+    methods += "  tf2::Quaternion q;\n";
+    methods += "  q.setRPY(0, 0, yaw);\n";
+    methods += "  goal_msg.pose.pose.orientation = tf2::toMsg(q);\n\n";
+
+    methods += "  rclcpp_action::Client\<nav2_msgs::action::NavigateToPose\>::SendGoalOptions opts;\n";
+    methods += "  opts.goal_response_callback =\n";
+    methods += "      [this](auto gh) {\n";
+    methods += "        RCLCPP_INFO(this-\>get_logger(), gh ? \"Goal ACCEPTED\" : \"Goal REJECTED\");\n";
+    methods += "      };\n";
+    methods += "  opts.result_callback =\n";
+    methods += "      [this, x, y, yaw](const auto& wr) {\n";
+    methods += "        RCLCPP_INFO(this-\>get_logger(), \"Result code=%d\", (int)wr.code);\n";
+    methods += "        if (wr.code != rclcpp_action::ResultCode::SUCCEEDED) {\n";
+    methods += "          if (<key>_path_blocked)\n";
+    methods += "            <key>_path_blocked();\n";
+    methods += "        } else {\n";
+    methods += "          if (<key>_in_position)\n";
+    methods += "            <key>_in_position(x, y, yaw);\n";
+    methods += "        }\n";
+    methods += "      };\n\n";
+    methods += "  nav_client_-\>async_send_goal(goal_msg, opts);\n";
+    methods += "}\n\n";
+  }
+
+  return capData(includes, members, methods, parameters, constructor, startUp);
+}
+
+public CapabilityData generateVision(str key, CapabilityDef cap)
+{
+  str includes = "";
+  str members = "";
+  str methods = "";
+  str parameters = "";
+  str constructor = "";
+  str startUp = "";
+
+  // ======================================================================================================
+  // Includes - These are the necessary headers
+  includes += "// ArucoVision ========================================================================== \n";
+  includes += "#include \<opencv2/aruco.hpp\>\n";
+  includes += "#include \<opencv2/opencv.hpp\>\n";
+  includes += "#include \<sensor_msgs/msg/image.hpp\>\n";
+  includes += "#include \<std_msgs/msg/color_rgba.hpp\>\n";
+  includes += "#include \<cv_bridge/cv_bridge.h\>\n";
+
+  // ======================================================================================================
+  // Members - These are the members needed for this capability
+  members += "  // ArucoVision ========================================================================== \n";
+  members += "  rclcpp::Subscription\<sensor_msgs::msg::Image\>::SharedPtr image_sub_;\n";
+  members += "  cv::Ptr\<cv::aruco::Dictionary\> aruco_dict_;\n";
+  members += "  cv::Ptr\<cv::aruco::DetectorParameters\> detector_params_;\n";
+  members += "  std::mutex img_mtx_;\n";
+  members += "  std::condition_variable img_cv_;\n";
+  members += "  sensor_msgs::msg::Image::SharedPtr last_img_;\n";
+  members += "  void imageCb(const sensor_msgs::msg::Image::SharedPtr msg);\n\n";
+
+  // ======================================================================================================
+  // Constructor - These are the actions necessary for the correct construction of this capability
+  constructor += "  // ArucoVision ========================================================================== \n";
+  constructor += "  aruco_dict_ = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);\n";
+  constructor += "  detector_params_ = cv::aruco::DetectorParameters::create();\n";
+  constructor += "  image_sub_ = create_subscription\<sensor_msgs::msg::Image\>(get_parameter(\"camera_topic\").as_string(), rclcpp::SensorDataQoS(), std::bind(&Supervisor::imageCb, this, std::placeholders::_1), options);\n\n";
+
+  // ======================================================================================================
+  // Parameters - These are the paramaters needed for this capability
+  parameters += "  // ArucoVision ========================================================================== \n";
+  parameters += "  declare_parameter\<std::string\>(\"camera_topic\", \"/pi_camera/image_raw\");\n";
+  parameters += "  declare_parameter\<std::string\>(\"camera_frame\", \"camera_link\");\n";
+  parameters += "  declare_parameter\<int\>(\"aruco_id\", 23);\n";
+  parameters += "  declare_parameter\<double\>(\"aruco_size_m\", 0.08);\n";
+  parameters += "  declare_parameter\<double\>(\"arrival_tolerance_m\", 0.30);\n";
+  parameters += "  declare_parameter\<double\>(\"aruco_timeout_s\", 15.0);\n\n";
+
+  // ======================================================================================================
+  // Start - Here we add any start up actions needed by this capability
+
+  // ======================================================================================================
+  // Methods - Here we add any methods that this capability might add to the supervisor
+  if (ctpl(str _, list[Argument] _, str ret) := cap.trigger)
+  {
+    methods += "// ArucoVision ========================================================================== \n";
+    methods += "<ret> <CLASS_NAME>::<key>Trigger()\n";
+    methods += "{\n";
+    methods += "  const int target_id = get_parameter(\"aruco_id\").as_int();\n";
+    methods += "  const double size_m = get_parameter(\"aruco_size_m\").as_double();\n";
+    methods += "  const double tol_m = get_parameter(\"arrival_tolerance_m\").as_double();\n";
+    methods += "  const double timeout_s = get_parameter(\"aruco_timeout_s\").as_double();\n";
+    methods += "  RCLCPP_INFO(get_logger(), \"Checking ArUco id=%d within %.2f size and %.2fm tolerance...\", target_id, size_m, tol_m);\n\n";
+
+    methods += "  if (task_thread_.joinable())\n";
+    methods += "    task_thread_.join();\n\n";
+
+    methods += "  task_thread_ = std::thread([this] {\n";
+    methods += "    while (true) {\n";
+    methods += "      {\n";
+    methods += "        std::unique_lock\<std::mutex\> lock(abort_mtx_);\n";
+    methods += "        if (aborted_)\n";
+    methods += "          break;\n";
+    methods += "      }\n\n";
+
+    methods += "      sensor_msgs::msg::Image::SharedPtr img;\n";
+    methods += "      {\n";
+    methods += "        std::unique_lock\<std::mutex\> lk(img_mtx_);\n";
+    methods += "        if (!img_cv_.wait_for(lk, 500ms, [&] { return last_img_ != nullptr; }))\n";
+    methods += "          continue;\n";
+    methods += "        img = last_img_;\n";
+    methods += "        last_img_.reset();  // consume\n";
+    methods += "      }\n\n";
+
+    methods += "      cv::Mat frame;\n";
+    methods += "      try {\n";
+    methods += "        frame = cv_bridge::toCvCopy(img, \"bgr8\")-\>image;\n";
+    methods += "      } catch (const std::exception& e) {\n";
+    methods += "        RCLCPP_WARN(get_logger(), \"Failed to cv_bridge::toCvCopy\");\n";
+    methods += "        continue;\n";
+    methods += "      }\n";
+
+    methods += "      if (frame.empty()) {\n ";
+    methods += "        RCLCPP_WARN(get_logger(), \"Frame is empty\");\n ";
+    methods += "        continue;\n ";
+    methods += "      }\n\n";
+
+    methods += "      std::vector\<int\> ids;\n";
+    methods += "      std::vector\<std::vector\<cv::Point2f\>\> corners;\n";
+    methods += "      cv::aruco::detectMarkers(frame, aruco_dict_, corners, ids, detector_params_);\n";
+    methods += "      if (ids.empty()) {\n";
+    methods += "        RCLCPP_WARN(get_logger(), \"Failed to detect markers, saving image\");\n";
+    methods += "        cv::imwrite(\"/tmp/cam.png\", frame);\n";
+    methods += "        continue;\n";
+    methods += "      } else {\n";
+    methods += "        RCLCPP_INFO(get_logger(), \"Found %ld ids\", ids.size());\n";
+    methods += "        if (<key>_found)\n";
+    methods += "          <key>_found();\n";
+    methods += "        return;\n";
+    methods += "      }\n";
+    methods += "    }\n";
+    methods += "  });\n";
+    methods += "}\n";
+  }
+
+  methods += "void Supervisor::imageCb(const sensor_msgs::msg::Image::SharedPtr msg)\n";
+  methods += "{\n";
+  methods += "  {\n";
+  methods += "    std::unique_lock\<std::mutex\> lk(img_mtx_);\n";
+  methods += "    last_img_ = msg;\n";
+  methods += "  }\n";
+  methods += "  img_cv_.notify_all();\n";
+  methods += "}\n\n";
+
+  return capData(includes, members, methods, parameters, constructor, startUp);
+}
+
+public CapabilityData generateGrip(str key, CapabilityDef cap)
+{
+  str includes = "";
+  str members = "";
+  str methods = "";
+  str parameters = "";
+  str constructor = "";
+  str startUp = "";
+
+  // ======================================================================================================
+  // Includes - These are the necessary headers
+  includes += "// Grip ========================================================================== \n";
+  includes += "#include \<moveit/move_group_interface/move_group_interface.h\>\n";
+  includes += "#include \<tf2_geometry_msgs/tf2_geometry_msgs.hpp\>\n";
+
+  // ======================================================================================================
+  // Members - These are the members needed for this capability
+  members += "  // Grip ========================================================================== \n";
+  members += "  std::shared_ptr\<moveit::planning_interface::MoveGroupInterface\> arm_mgi_;\n";
+  members += "  bool moveGripperHome();\n\n";
+
+  // ======================================================================================================
+  // Constructor - These are the actions necessary for the correct construction of this capability
+
+  // ======================================================================================================
+  // Parameters - These are the paramaters needed for this capability
+  parameters += "  // Grip ========================================================================== \n";
+  parameters += "  declare_parameter\<std::vector\<double\>\>(\"target_offset_xyz\", {0.18, 0.0, 0.2});\n";
+  parameters += "  declare_parameter\<std::vector\<double\>\>(\"target_offset_rpy\", {0.0, 0.0, 0.03});\n";
+  parameters += "  declare_parameter\<std::vector\<double\>\>(\"drive_pose\", {-0.068, 0.0, 0.26});\n";
+  parameters += "  declare_parameter\<std::string\>(\"arm_group\", \"arm\");\n";
+  parameters += "  declare_parameter\<std::string\>(\"eef_link\", \"end_effector_link\");\n\n";
+
+  // ======================================================================================================
+  // Start - Here we add any start up actions needed by this capability
+  startUp += "  if (arm_mgi_ == nullptr){ \n";
+  startUp += "    arm_mgi_ = std::make_shared\<moveit::planning_interface::MoveGroupInterface\>(shared_from_this(), get_parameter(\"arm_group\").as_string());\n";
+  startUp += "    arm_mgi_-\>setEndEffectorLink(get_parameter(\"eef_link\").as_string());\n";
+  startUp += "  }\n\n";
+
+  startUp += "  if (!moveGripperHome()) {\n";
+  startUp += "    RCLCPP_ERROR(get_logger(), \"Failed to set arm to drive position.\");\n";
+  startUp += "    rclcpp::shutdown();\n";
+  startUp += "    return;\n";
+  startUp += "  }\n\n";
+
+  // ======================================================================================================
+  // Methods - Here we add any methods that this capability might add to the supervisor
+  if (ctpl(str _, list[Argument] _, str ret) := cap.trigger)
+  {
+    methods += "void <CLASS_NAME>::<key>Trigger(int grip)\n";
+    methods += "{\n";
+    methods += "  if (task_thread_.joinable())\n";
+    methods += "    task_thread_.join();\n\n";
+
+    methods += "  task_thread_ = std::thread([this] {\n";
+    methods += "    auto offs_xyz = get_parameter(\"target_offset_xyz\").as_double_array();\n\n";
+
+    methods += "    const auto planning_frame = arm_mgi_-\>getPlanningFrame();\n";
+    methods += "    geometry_msgs::msg::PoseStamped goal;\n";
+    methods += "    goal.header.stamp = now();\n";
+    methods += "    goal.header.frame_id = planning_frame;\n";
+    methods += "    goal.pose.position.x = offs_xyz[0];\n";
+    methods += "    goal.pose.position.y = offs_xyz[1];\n";
+    methods += "    goal.pose.position.z = offs_xyz[2];\n\n";
+
+    // TODO: These are all great candidates for capability parameters
+    methods += "    arm_mgi_-\>setPoseReferenceFrame(planning_frame);\n";
+    methods += "    arm_mgi_-\>setStartStateToCurrentState();\n";
+    methods += "    arm_mgi_-\>clearPoseTargets();\n";
+    methods += "    arm_mgi_-\>setGoalTolerance(0.01);\n";
+    methods += "    arm_mgi_-\>setGoalOrientationTolerance(0.25);\n";
+    methods += "    arm_mgi_-\>setPlanningTime(10.0);\n";
+    methods += "    arm_mgi_-\>setNumPlanningAttempts(10);\n\n";
+
+    methods += "    arm_mgi_-\>setPositionTarget(goal.pose.position.x, goal.pose.position.y, goal.pose.position.z, arm_mgi_-\>getEndEffectorLink());\n\n";
+
+    methods += "    moveit::planning_interface::MoveGroupInterface::Plan plan;\n";
+    methods += "    if (arm_mgi_-\>plan(plan) != moveit::core::MoveItErrorCode::SUCCESS) {\n";
+    methods += "      RCLCPP_ERROR(get_logger(), \"MoveIt plan failed.\");\n";
+    methods += "      if (<key>_failed)\n";
+    methods += "        <key>_failed();\n";
+    methods += "      return;\n";
+    methods += "    }\n\n";
+
+    methods += "    if (arm_mgi_-\>execute(plan) != moveit::core::MoveItErrorCode::SUCCESS) {\n";
+    methods += "      RCLCPP_ERROR(get_logger(), \"MoveIt exec failed.\");\n";
+    methods += "      if (grip_failed)\n";
+    methods += "        grip_failed();\n";
+    methods += "      return;\n";
+    methods += "    }\n\n";
+
+    // TODO: Do we really need this?
+    // methods += "    rclcpp::sleep_for(std::chrono::seconds(2));\n";
+    methods += "    if (!moveGripperHome())\n";
+    methods += "    {\n";
+    methods += "      RCLCPP_ERROR(get_logger(), \"Failed to set arm to drive position.\");\n";
+    methods += "      if (grip_failed)\n";
+    methods += "        grip_failed();\n";
+    methods += "      return;\n";
+    methods += "    }\n\n";
+
+    methods += "    if (<key>_handled)\n";
+    methods += "      <key>_handled();\n";
+    methods += "  });\n";
+    methods += "}\n\n";
+  }
+
+  methods += "bool <CLASS_NAME>::moveGripperHome()\n";
+  methods += "{\n";
+  methods += "  if (!arm_mgi_)\n";
+  methods += "  {\n";
+  methods += "    RCLCPP_WARN(get_logger(), \"No arm mgi\");\n";
+  methods += "    return false;\n";
+  methods += "  }\n\n";
+
+  methods += "  auto drive_pose = get_parameter(\"drive_pose\").as_double_array();\n\n";
+
+  methods += "  const auto planning_frame = arm_mgi_-\>getPlanningFrame();\n";
+  methods += "  arm_mgi_-\>setPoseReferenceFrame(planning_frame);\n";
+  methods += "  arm_mgi_-\>setStartStateToCurrentState();\n";
+  methods += "  arm_mgi_-\>clearPoseTargets();\n";
+  methods += "  arm_mgi_-\>setGoalTolerance(0.01);             // 1 cm\n";
+  methods += "  arm_mgi_-\>setGoalOrientationTolerance(0.25);  // ~20°\n";
+  methods += "  arm_mgi_-\>setPlanningTime(10.0);\n";
+  methods += "  arm_mgi_-\>setNumPlanningAttempts(10);\n\n";
+
+  methods += "  arm_mgi_-\>setPositionTarget(drive_pose[0], drive_pose[1], drive_pose[2], arm_mgi_-\>getEndEffectorLink());\n\n";
+
+  methods += "  moveit::planning_interface::MoveGroupInterface::Plan plan;\n";
+  methods += "  if (arm_mgi_-\>plan(plan) != moveit::core::MoveItErrorCode::SUCCESS) {\n";
+  methods += "    RCLCPP_ERROR(get_logger(), \"MoveIt plan to home failed.\");\n";
+  methods += "    return false;\n";
+  methods += "  }\n\n";
+
+  methods += "  if (arm_mgi_-\>execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)\n";
+  methods += "  {\n";
+  methods += "    RCLCPP_ERROR(get_logger(), \"MoveIt exec failed.\");\n";
+  methods += "    return false;\n";
+  methods += "  }\n\n";
+
+  methods += "  return true;\n";
+  methods += "}\n";
+
+  return capData(includes, members, methods, parameters, constructor, startUp);
+}
+
+// =============================================================
+// Helpers
+void generateDir(loc output)
+{
+  if (exists(output))
+    return;
+
+  mkDirectory(output);
+}
 
 str clean(value val)
   = replaceAll("<val>", "\"", "");
 
-// ======================================================================
-// Message specific generators
-// ======================================================================
-public str generateString(str caller, str call, bool topublish, list[str] formals) {
+str toComponent(str name)
+  = "c" + uncapitalize(replaceAll(name, " ", ""));
+
+str toInterface(str name)
+  = "i" + uncapitalize(replaceAll(name, " ", ""));
+
+str toVariable(str name)
+  = uncapitalize(replaceAll(name, " ", ""));
+
+str toFilename(str name)
+  = replaceAll(name, " ", "");
+
+// =============================================================
+// Argument
+str argsToString(list[Argument] args)
+{
+  return "<for (i <- [0..size(args)]){><argToString(args[i])><if(i < size(args) - 1){>, <}><}>";
+}
+
+str argToString(Argument arg)
+{
+  if (\arg(str arg_type, str arg_id) := arg)
+    return "<arg_type> <arg_id>";
+
+  return "";
+}
+
+str argIdToString(Argument arg)
+{
+  if (\arg(str _, str arg_id) := arg)
+    return "<arg_id>";
+
+  return "";
+}
+
+str argsIdToString(list[Argument] args)
+{
+  return return "<for (i <- [0..size(args)]){><argIdToString(args[i])><if(i < size(args) - 1){>, <}><}>";;
+}
+// ============================================================
+// EventDefStatement
+public CallTpl generate(\event(str return_type, str id, list[Argument] args, list[EventDefComponent] _))
+{
+  println("event: <id> -\> <return_type>");
+  return ctpl(id, args, return_type);
+}
+
+// ============================================================
+// RosDefStatement
+public Result generate(\trigger_block(EventDefStatement call), Env env)
+{
+  // println("trigger_block: <call>");
+  eventTemplate = generate(call);
+  if ("capabilities" in env && CapabilityDef task := env["capabilities"]) {
+    task.trigger = eventTemplate;
+    env["capabilities"] = task;
+  }
+
+  return <env, "">;
+}
+
+public Result generate(\return_block(EventDefStatement call), Env env)
+{
+  // println("return_block: <call>");
+  eventTemplate = generate(call);
+  if ("capabilities" in env && CapabilityDef task := env["capabilities"]) {
+    task.onReturn = eventTemplate;
+    env["capabilities"] = task;
+  }
+  return <env, "">;
+}
+
+public Result generate(\abort_block(EventDefStatement call), Env env)
+{
+  // println("abort_block: <call>");
+  eventTemplate = generate(call);
+  if ("capabilities" in env && CapabilityDef task := env["capabilities"]) {
+    task.onAbort = eventTemplate;
+    env["capabilities"] = task;
+  }
+  return <env, "">;
+}
+
+public Result generate(\error_block(EventDefStatement call), Env env)
+{
+  // println("error_block: <call>");
+  eventTemplate = generate(call);
+  if ("capabilities" in env && CapabilityDef task := env["capabilities"]) {
+    task.onError = eventTemplate;
+    env["capabilities"] = task;
+  }
+  return <env, "">;
+}
+
+public Result generate(\in_block(EventDefStatement call), Env env)
+{
+  println("in_block: <call>");
+  return <env, "">;
+}
+
+public Result generate(\out_block(EventDefStatement call), Env env)
+{
+  println("out_block: <call>");
+  return <env, "">;
+}
+
+// ============================================================
+// Statement
+public Result generate(\variables(list[VariableStatement] vars), Env env)
+{
+  println("variables <vars>");
+  return <env, "">;
+}
+
+public Result generate(\action(str topic, str msg, list[RosDefStatement] events), Env env)
+{
+  println("action <topic> <msg>");
+
+  env["capabilities"] = capDef("action", topic, msg, empty_ctpl(), empty_ctpl(), empty_ctpl(), empty_ctpl());
+  for (event <- events) {
+    <env, _> = generate(event, env);
+  }
+
+  return <env, "">;
+}
+
+public Result generate(\service(str topic, str msg, list[RosDefStatement] events), Env env)
+{
+  println("service <topic> <msg>");
+  for (event <- events) {
+    <env, _> = generate(event, env);
+  }
+  return <env, "">;
+}
+
+public Result generate(\topic(str topic, str msg, list[RosDefStatement] events), Env env)
+{
+  println("topic <topic> <msg>");
+  for (event <- events) {
+    <env, _> = generate(event, env);
+  }
+  return <env, "">;
+}
+
+public Result generate(\ros_def(RosDefStatement statement), Env env)
+{
+  println("ros_def <statement>");
+  return <env, "">;
+}
+
+public Result generate(\tasks_block(list[Flow] flows), Env env) {
+  println("\tasks_block <flows>");
   str output = "";
-  if (topublish) {
-    output = "message.data =<for (arg <- formals){> \"<arg>: \" + std::to_string(<arg>) +<}>";
-    output = output[..-2] + ";\n";
-  } else {
-    output = "msg-\>data.erase(std::remove(msg-\>data.begin(), msg-\>data.end(), \' \'), msg-\>data.end());
-    '<for (arg <- formals) {>  auto index<arg> =  msg-\>data.find(\"<arg>:\");\n<}>
-    '  if (<for (int i <- [0..size(formals)]) {>index<formals[i]> == std::string::npos<if (i != size(formals) - 1){> || <}><}>)
-    '  {
-    '    if (<uncapitalize(caller)>_failed_callback) <uncapitalize(caller)>_failed_callback(dzn);
-    '    return;
-    '  }
-    '<for (int i <- [0..size(formals)]) {><if (i != size(formals) - 1){>  auto <formals[i]> = msg-\>data.substr(index<formals[i]> + 2, index<formals[i + 1]> - 1 - (index<formals[i]> + 2));\n<}else{>  auto y = msg-\>data.substr(index<formals[i]> + 2, msg-\>data.size() - (index<formals[i]> + 2));<}><}>
-    '
-    '  if (<uncapitalize(caller)>_<call>) <uncapitalize(caller)>_<call>(<for (int i <- [0..size(formals)]) {>std::stof(<formals[i]>)<if (i != size(formals) - 1){>, <}><}>);
-    '";
-  }
-
-  return output;
-}
-
-// ======================================================================
-public Result generate(\var(str name), Env env)
-{
-  if (name in env)
-    return <env, env[name]>;
-
-  return <env, name>;
-}
-
-private Env publisherConstructor(str caller, str topic, str msg, Env env) {
-  if (str con := env["supervisor_constructor"])
-    env["supervisor_constructor"] = con + "<uncapitalize(caller)>_publisher_ = this-\>create_publisher\<<clean(msg)>\>(\"<clean(topic)>\", 10);\n";
-
-  return env;
-}
-
-private Env subscriberConstructor(str caller, str topic, str msg, Env env) {
-  if (str con := env["supervisor_constructor"])
-    env["supervisor_constructor"] = con + "<uncapitalize(caller)>_subscription_ = this-\>create_subscription\<<clean(msg)>\>(\"<clean(topic)>\", 10, std::bind(&<CLASS_NAME>::<uncapitalize(caller)>_callback, this, std::placeholders::_1));\n";
-
-  return env;
-}
-
-private Env actionConstructor(str caller, str topic, str msg, Env env) {
-  if (str con := env["supervisor_constructor"])
-    env["supervisor_constructor"] = con + "<uncapitalize(caller)>_action_ = rclcpp_action::create_client\<<clean(msg)>\>(this, \"<clean(topic)>\");\n";
-
-  env["supervisor_members"] += "rclcpp_action::Client\<<clean(msg)>\>::SharedPtr <uncapitalize(caller)>_action_;\n";
-
-  return env;
-}
-
-private Result generate(str caller, \ros_event(str comm, str topic, str msg), str call, list[str] formals, str inputType, Env env)
-{
-  str implementation = "";
-
-  env["msg_type"] = clean(msg);
-
-  if (comm == "topic") {
-    // Constructor
-    if (inputType == "trigger" || inputType == "abort") {
-      env = publisherConstructor(caller, topic, msg, env);
-    } else {
-      env = subscriberConstructor(caller, topic, msg, env);
-    }
-
-    // Implementation
-    if (inputType == "trigger" || inputType == "abort") {
-      // Create message
-      implementation += "auto message = <clean(msg)>();\n";
-      // Message specific conversion
-      if (clean(msg) == "std_msgs::msg::String")
-        implementation += generateString(caller, call, true, formals);
-      // Publish
-      implementation += "<uncapitalize(caller)>_publisher_-\>publish(message);\n";
-    } else {
-      // Convert from ROS to internal type
-      if (clean(msg) == "std_msgs::msg::String")
-        implementation += generateString(caller, call, true, formals);
-    }
-  } else if (comm == "action") {
-    if (topic notin ACTIONS) {
-      env = actionConstructor(caller, topic, msg, env);
-      println("Adding action: <topic>");
-      ACTIONS[topic] = topic;
-      env["supervisor_imports"] += "#include \<nav2_msgs/action/navigate_to_pose.hpp\>\n";
-    }
-
-    if (inputType == "trigger") {
-      implementation += "if (!action_client_-\>wait_for_action_server(10s)) {\n";
-      implementation += "  RCLCPP_ERROR(get_logger(), \"Nav2 action server not available after 10s.\");\n";
-      implementation += "  return;\n";
-      implementation += "}\n";
-
-      // Convert arguments to message
-      implementation += "<clean(msg)> goal_msg;\n";
-
-      // Message specific stuff
-      implementation += "goal_msg.pose.header.stamp = std::chrono_literals::now();\n";
-      implementation += "goal_msg.pose.header.frame_id = \"map\";\n";
-
-      implementation += "goal_msg.pose.pose.position.x = 1.0;\n";
-      implementation += "goal_msg.pose.pose.position.y = 0.0;\n";
-      implementation += "goal_msg.pose.pose.position.z = 0.0;\n";
-      implementation += "goal_msg.pose.pose.orientation = yawToQuat(0.0);\n";
-
-      //  RCLCPP_INFO(get_logger(), "Sending NavigateToPose goal (%.2f, %.2f)", goal_msg.pose.pose.position.x, goal_msg.pose.pose.position.y);
-
-      implementation += "auto send_goal_options = rclcpp_action::Client\<<clean(msg)>\>::SendGoalOptions();\n";
-      implementation += "send_goal_options.result_callback =\n";
-      implementation += "  [this](const GoalHandleNav::WrappedResult &result) {\n";
-      implementation += "    switch (result.code) {\n";
-      implementation += "      case rclcpp_action::ResultCode::SUCCEEDED:\n";
-      implementation += "        RCLCPP_INFO(this-\>get_logger(), \"Goal reached!\");\n";
-      implementation += "        <uncapitalize(caller)>_callback();\n";
-      implementation += "        break;\n";
-      implementation += "      case rclcpp_action::ResultCode::ABORTED:\n";
-      implementation += "        RCLCPP_ERROR(this-\>get_logger(), \"Goal was aborted\");\n";
-      implementation += "        <uncapitalize(caller)>_error_callback();\n";
-      implementation += "        break;\n";
-      implementation += "      case rclcpp_action::ResultCode::CANCELED:\n";
-      implementation += "        RCLCPP_WARN(this-\>get_logger(), \"Goal was canceled\");\n";
-      implementation += "        break;\n";
-      implementation += "      default:\n";
-      implementation += "        RCLCPP_ERROR(this-\>get_logger(), \"Unknown result code\");\n";
-      implementation += "        break;\n";
-      implementation += "    }\n";
-      implementation += "    rclcpp::shutdown();\n";
-      implementation += "  };\n";
-      implementation += "goal_future_ = action_client_-\>async_send_goal(goal_msg, send_goal_options);\n";
-
-      env["supervisor_members"] += "rclcpp_action::Client\<<clean(msg)>\>::SharedFuture goal_future_;\n";
-
-    } else if (inputType == "abort") {
-      implementation += "if (!goal_future_.valid()) return;\n";
-      implementation += "auto gh = goal_future_.get();\n";
-      implementation += "if (!gh) return;\n";
-      implementation += "RCLCPP_WARN(this-\>get_logger(), \"Cancelling goal...\");\n";
-      implementation += "action_client_-\>async_cancel_goal(gh, [this](auto) { RCLCPP_INFO(this-\>get_logger(), \"Cancel request sent.\"); });\n";
-    } else if (inputType == "return") {
-      implementation += "if (<uncapitalize(caller)>_<call>)\n";
-      implementation += "  <uncapitalize(caller)>_<call>();\n";
-    } else if (inputType == "error") {
-      implementation += "if (<uncapitalize(caller)>_<call>)\n";
-      implementation += "  <uncapitalize(caller)>_<call>();\n";
-    }
-  }
-
-  return <env, implementation>;
-}
-
-public Result generate(str caller, \trigger_block(EventDefStatement call), Env env)
-{
-  // println("\\trigger_block(<call>)");
-  if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] components) := call) {
-    str args = "";
-    list[str] formals = [];
-    for (arg <- arguments) {
-      if (\arg(str arg_type, str arg_id) := arg) {
-        args += "<arg_type> <arg_id>, ";
-        formals += arg_id;
-      }
-    }
-
-    list[str] implementation = [];
-    for (c <- components) {
-      <env, a> = generate(caller, c, id, formals, "trigger", env);
-      if (str b := a, !isEmpty(b))
-        implementation += b;
-    }
-
-    if (str def := env["supervisor_definitions"])
-      env["supervisor_definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>);\n";
-
-    if (str def := env["definitions"])
-      env["definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>) override;\n";
-
-    if (str imp := env["supervisor_implementations"])
-      env["supervisor_implementations"] = imp + "
-      '<ret> <CLASS_NAME>::<uncapitalize(caller)>_<id>(<args[..-2]>) {
-      '<for (a <- implementation){>  <a><}>}\n";
-  }
-
   return <env, "">;
 }
 
-public Result generate(str caller, \abort_block(EventDefStatement call), Env env)
+// ============================================================
+// Top Level
+public bool generateCapability(str id, CapabilityDef cap)
 {
-  // println("\\abort_block(<call>)");
-  if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] components) := call) {
-    str args = "";
-    list[str] formals = [];
-    for (arg <- arguments) {
-      if (\arg(str arg_type, str arg_id) := arg) {
-        args += "<arg_type> <arg_id>, ";
-        formals += arg_id;
-      }
-    }
+  // Prepare methods
+  str methodsDef = "";
+  str methodsImpl = "";
+  str callbacks = "";
+  if (ctpl(str name, list[Argument] args, str ret) := cap.trigger)
+  {
+    str arguments = argsToString(args);
+    methodsDef += "  <ret> <id>_<name>(<arguments>) override;\n";
 
-    list[str] implementation = [];
-    for (c <- components) {
-      <env, a> = generate(caller, c, id, formals, "abort", env);
-      if (str b := a, !isEmpty(b))
-        implementation += b;
-    }
+    methodsImpl += "<ret> <toComponent(id)>::<id>_<name>(<arguments>) {\n";
+    methodsImpl += "  auto supervisor = dzn_locator.get\<std::shared_ptr\<<CLASS_NAME>\>\>();\n";
+    methodsImpl += "  if (supervisor == nullptr)\n";
+    methodsImpl += "  {\n";
+    methodsImpl += "    std::cout \<\< \"Failed to retrieve the <CLASS_NAME>\" \<\< std::endl;\n";
+    methodsImpl += "    return;\n";
+    methodsImpl += "  }\n";
+    methodsImpl += "  supervisor-\><id>Trigger(<argsIdToString(args)>);\n";
+    methodsImpl += "}\n\n";
 
-    if (str def := env["supervisor_definitions"])
-      env["supervisor_definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>);\n";
-
-    if (str def := env["definitions"])
-      env["definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>) override;\n";
-
-    if (str imp := env["supervisor_implementations"])
-      env["supervisor_implementations"] = imp + "
-      '<ret> <CLASS_NAME>::<uncapitalize(caller)>_<id>(<args[..-2]>) {
-      '<for (a <- implementation){>  <a><}>}\n";
-  }
-
-  return <env, "">;
-}
-
-public Result generate(str caller, \return_block(EventDefStatement call), Env env)
-{
-  // println("\\return_block(<call>)");
-  if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] components) := call) {
-    str args = "";
-    list[str] formals = [];
-    for (arg <- arguments) {
-      if (\arg(str arg_type, str arg_id) := arg) {
-        args += "<arg_type> <arg_id>, ";
-        formals += arg_id;
-      }
-    }
-
-    list[str] implementation = [];
-    for (c <- components) {
-      <env, a> = generate(caller, c, id, formals, "return", env);
-      if (str b := a, !isEmpty(b))
-        implementation += b;
-    }
-
-    env["supervisor_definitions"] += "std::function\<<ret>(<args[..-2]>)\> <uncapitalize(caller)>_<id>;\n";
-    // if (!isEmpty(implementation))
-    env["supervisor_definitions"] += "void <uncapitalize(caller)>_callback(const <env["msg_type"]>::SharedPtr msg);\n";
-
-    if (str imp := env["supervisor_implementations"]) {
-      env["supervisor_implementations"] = imp + "
-      '<ret> <CLASS_NAME>::<uncapitalize(caller)>_callback(const <env["msg_type"]>::SharedPtr msg) {
-      '<for (a <- implementation){>  <a><}>}\n";
+    if (ctpl(str retName, list[Argument] retArgs, str _) := cap.onReturn) {
+      callbacks += "  supervisor-\><id>_<retName> = [this](<argsToString(retArgs)>) {\n";
+      callbacks += "    auto& pump = dzn_locator.get\<dzn::pump\>();\n";
+      callbacks += "    pump([this<if (size(retArgs) > 0){>, <}><argsIdToString(retArgs)>] { <id>_<retName>(<argsIdToString(retArgs)>); });\n";
+      callbacks += "  };\n";
     }
   }
 
-  return <env, "">;
-}
+  if (ctpl(str name, list[Argument] args, str ret) := cap.onAbort)
+  {
+    str arguments = argsToString(args);
+    methodsDef += "  <ret> <id>_<name>(<arguments>) override;\n";
 
-public Result generate(str caller, \error_block(EventDefStatement call), Env env)
-{
-  // println("\\error_block(<call>)");
-  if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] components) := call) {
-    str args = "";
-    list[str] formals = [];
-    for (arg <- arguments) {
-      if (\arg(str arg_type, str arg_id) := arg) {
-        args += "<arg_type> <arg_id>, ";
-        formals += arg_id;
-      }
-    }
+    methodsImpl += "<ret> <toComponent(id)>::<id>_<name>(<arguments>) {\n";
+    methodsImpl += "  auto supervisor = dzn_locator.get\<std::shared_ptr\<<CLASS_NAME>\>\>();\n";
+    methodsImpl += "  if (supervisor == nullptr)\n";
+    methodsImpl += "  {\n";
+    methodsImpl += "    std::cout \<\< \"Failed to retrieve the <CLASS_NAME>\" \<\< std::endl;\n";
+    methodsImpl += "    return;\n";
+    methodsImpl += "  }\n";
+    methodsImpl += "  supervisor-\>abort(<argsIdToString(args)>);\n";
+    methodsImpl += "}\n\n";
 
-    list[str] implementation = [];
-    for (c <- components) {
-      <env, a> = generate(caller, c, id, formals, "error", env);
-      if (str b := a, !isEmpty(b))
-        implementation += b;
-    }
-
-    env["supervisor_definitions"] += "std::function\<<ret>(<args[..-2]>)\> <uncapitalize(caller)>_<id>;\n";
-    // if (!isEmpty(implementation))
-    env["supervisor_definitions"] += "void <uncapitalize(caller)>_error_callback(const <env["msg_type"]>::SharedPtr msg);\n";
-
-    if (str imp := env["supervisor_implementations"]) {
-      env["supervisor_implementations"] = imp + "
-      '<ret> <CLASS_NAME>::<uncapitalize(caller)>_error_callback(const <env["msg_type"]>::SharedPtr msg) {
-      '<for (a <- implementation){>  <a><}>}\n";
-    }
-  }
-  return <env, "">;
-}
-
-public Result generate(\variables(list[VariableStatement] vars), Env env) {
-  list[tuple[str, str, str, str]] variables = [];
-  for (v <- vars) {
-    if (\variable_def(str var_type, str var_name, Expression exp, Expression base) := v) {
-      <_, a> = generate(exp, env);
-      <_, b> = generate(base, env);
-      variables += <var_type, var_name, a, b>;
+    if (ctpl(str retName, list[Argument] retArgs, str _) := cap.onError) {
+      callbacks += "  supervisor-\><id>_<retName> = [this](<argsToString(retArgs)>) {\n";
+      callbacks += "    auto& pump = dzn_locator.get\<dzn::pump\>();\n";
+      callbacks += "    pump([this<if (size(retArgs) > 0){>, <}><argsIdToString(retArgs)>] { <id>_<retName>(<argsIdToString(retArgs)>); });\n";
+      callbacks += "  };\n";
     }
   }
 
-  env["vars"] = variables;
-
-  return <env, "">;
-}
-
-// Capabilities
-public Result generate(str caller, \accepts(list[EventDefStatement] events), Env env)
-{
-  for (event <- events) {
-    if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] _) := event) {
-      str args = "";
-      for (arg <- arguments) {
-        if (\arg(str arg_type, str arg_id) := arg)
-          args += "<arg_type> <arg_id>, ";
-      }
-
-      if (str def := env["supervisor_definitions"])
-        env["supervisor_definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>);\n";
-
-      if (str def := env["definitions"])
-        env["definitions"] = def + "<ret> <uncapitalize(caller)>_<id>(<args[..-2]>);\n";
-
-      if (str imp := env["supervisor_implementations"])
-        env["supervisor_implementations"] = imp + "<ret> <CLASS_NAME>::<uncapitalize(caller)>_<id>(<args[..-2]>) {}\n";
-    }
-  }
-
-  return <env, "">;
-}
-
-public Result generate(str caller, \emits(list[EventDefStatement] events), Env env)
-{
-  for (event <- events) {
-    if (\event(str ret, str id, list[Argument] arguments, list[EventDefComponent] _) := event) {
-      str args = "";
-      for (arg <- arguments) {
-        if (\arg(str arg_type, str arg_id) := arg)
-          args += "<arg_type> <arg_id>, ";
-      }
-
-      if (str def := env["supervisor_definitions"])
-        env["supervisor_definitions"] = def + "std::function\<<ret>(<args[..-2]>)\> <uncapitalize(caller)>_<id>;\n";
-
-      if (str def := env["definitions"])
-        env["definitions"] = def + "std::function\<<ret>(<args[..-2]>)\> <uncapitalize(caller)>_<id>;\n";
-    }
-  }
-
-  return <env, "">;
-}
-
-public Result generate(\task(str id, list[Argument] args, list[Statement] tstatements, bool iscomponent, str ttype), Env env) {
-  println("Generating ROS methods for: <id>");
-  // println("\\task(<id>, <args>, <tstatements>)");
-
-  env["supervisor_definitions"]     += "// <id> definitions ===============================\n";
-  env["supervisor_members"]         += "// <id> members ===================================\n";
-  env["supervisor_constructor"]     += "// <id> constructor ===============================\n";
-  env["supervisor_implementations"] += "// <id> implementations ===========================\n";
-
-  env["definitions"] = "";
-  env["members"] = "";
-  env["constructor"] = "";
-  env["implementations"] = "";
-
-  for (s <- tstatements) {
-    <env, _> = generate(id, s, env);
-  }
-
-  // Write supervisor header file
+  // Generate header
   str header = trim("
 #pragma once
 
-#include \<a_<uncapitalize(id)>.h\>
+#include \"a_<toComponent(id)>.hh\"
 
-#include \"supervisor.hh\";
-
-class <uncapitalize(id)> : public skel::c<uncapitalize(id)>
+class <toComponent(id)> : public skel::<toComponent(id)>
 {
 public:
-  <uncapitalize(id)>(dzn::locator const& locator);
-  ~<uncapitalize(id)>();
+  <toComponent(id)>(dzn::locator const& locator);
+  ~<toComponent(id)>();
 
-  void set_supervisor(std::shared_ptr\<<CLASS_NAME>\> <uncapitalize(CLASS_NAME)>);
-
-  <env["definitions"]>
-private:
-  std::shared_ptr\<<CLASS_NAME>\> m<CLASS_NAME>;
+  void start();
+<methodsDef>
 };");
 
-
-  // Write supervisor source file
+  // Generate source
   str source = trim("
-#include \"<uncapitalize(id)>.hh\"
+#include \"<toComponent(id)>.hh\"
+#include \<dzn/pump.hh\>
+#include \"<uncapitalize(CLASS_NAME)>.hh\"
 
-<uncapitalize(id)>::<uncapitalize(id)>()
-    : skel::c<uncapitalize(id)>(locator)
+<toComponent(id)>::<toComponent(id)>(dzn::locator const& locator)
+    : skel::<toComponent(id)>(locator)
 {
 }
 
-void cdrive::set_supervisor(std::shared_ptr\<<CLASS_NAME>\> <uncapitalize(CLASS_NAME)>)
+<toComponent(id)>::~<toComponent(id)>()
 {
-  m<CLASS_NAME> = <uncapitalize(CLASS_NAME)>;
-
-  m<CLASS_NAME>-\>drive_in_position = [this](float x, float y) { drive_in_position(x, y); };
-  m<CLASS_NAME>-\>drive_path_blocked = [this] { drive_path_blocked(); };
 }
 
-<env["supervisor_implementations"]>
-");
+void <toComponent(id)>::start()
+{
+  auto supervisor = dzn_locator.get\<std::shared_ptr\<<CLASS_NAME>\>\>();
+  if (supervisor == nullptr)
+  {
+    std::cout \<\< \"Failed to retrieve the <CLASS_NAME> during start\" \<\< std::endl;
+    return;
+  }
 
-  loc header_filename = OUTPUT_DIR + "<uncapitalize(id)>.hh";
-  loc source_filename = OUTPUT_DIR + "<uncapitalize(id)>.cc";
+<callbacks>
+}
+
+<methodsImpl>
+;");
+
+  // println(header);
+  // println(source);
+  loc header_filename = INCLUDE_DIR + "<toComponent(id)>.hh";
+  loc source_filename = SRC_OUTPUT_DIR + "<toComponent(id)>.cc";
 
   touch(header_filename);
   touch(source_filename);
@@ -443,96 +767,297 @@ void cdrive::set_supervisor(std::shared_ptr\<<CLASS_NAME>\> <uncapitalize(CLASS_
   writeFile(header_filename, header);
   writeFile(source_filename, source);
 
-  env["definitions"] = "";
-  env["members"] = "";
-  env["constructor"] = "";
-  env["implementations"] = "";
+  return true;
+}
+
+public bool generateCapabilities(map[str, str] capMap, Env env)
+{
+  println("generateCapability: <capMap>");
+
+  for (key <- capMap)
+  {
+    if (key in env && CapabilityDef cap := env[key])
+    {
+      println("Generating capability: <key> -\> <capMap[key]>\nCap:\n <cap>");
+      generateCapability(capMap[key], cap);
+    }
+  }
+
+  return true;
+}
+
+public bool generateSupervisor(map[str, str] capMap, Env env)
+{
+  str capTriggers = "";
+  str capCallbacks = "// Callbacks ========================================================\n";
+  // str members = "";
+
+  str includes = "";
+  str members = "";
+  str methods = "";
+  str parameters = "";
+  str constructor = "";
+  str startUp = "";
+
+  for (key <- capMap)
+  {
+    if (key in env && CapabilityDef cap := env[key])
+    {
+      println("Gathering capability: <key> -\> <capMap[key]>\nCap:\n <cap>");
+      if (ctpl(str _, list[Argument] args, str ret) := cap.trigger)
+      {
+        capTriggers += "  // <key> ===============================================\n";
+        capTriggers += "  <ret> <capMap[key]>Trigger(<argsToString(args)>);\n";
+      }
+
+      if (ctpl(str name, list[Argument] args, str ret) := cap.onReturn)
+      {
+        capCallbacks += "  std::function\<<ret>(<argsToString(args)>)\> <capMap[key]>_<name>;\n";
+      }
+
+      if (ctpl(str name, list[Argument] args, str ret) := cap.onError)
+      {
+        capCallbacks += "  std::function\<<ret>(<argsToString(args)>)\> <capMap[key]>_<name>;\n";
+      }
+
+      cData = empty_data();
+      if (key == "Drive")
+        cData = generateDrive(capMap[key], cap);
+      else if (key == "Vision")
+        cData = generateVision(capMap[key], cap);
+      else if (key == "Grip")
+        cData = generateGrip(capMap[key], cap);
+      else if (key == "Initialpose")
+        cData = generateInitialPose(capMap[key], cap);
+
+      includes += cData.includes;
+      members += cData.members;
+      methods += cData.methods;
+      parameters += cData.parameters;
+      constructor += cData.constructor;
+      startUp += cData.startUp;
+    }
+
+  }
+
+  str header = trim("
+#pragma once
+
+#include \<functional\>
+#include \<string\>
+#include \<memory\>
+#include \<thread\>
+#include \<mutex\>
+#include \<condition_variable\>
+
+#include \<rclcpp/rclcpp.hpp\>
+#include \<rclcpp_action/rclcpp_action.hpp\>
+<includes>
+
+class <CLASS_NAME> : public rclcpp::Node
+{
+public:
+  <CLASS_NAME>();
+
+  void start();
+  void abort();
+
+<capTriggers>
+<capCallbacks>
+
+  std::function\<void()\> started;
+
+private:
+  // Generic ========================================================
+  std::mutex abort_mtx_;
+  bool aborted_{false};
+  std::thread task_thread_;
+
+  rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::CallbackGroup::SharedPtr cbg_;
+
+<members[..-2]>
+};
+");
+
+  str source = trim("
+#include \"<uncapitalize(CLASS_NAME)>.hh\"
+
+using namespace std::chrono_literals;
+
+<CLASS_NAME>::<CLASS_NAME>()
+    : Node(\"<uncapitalize(CLASS_NAME)>\")
+{
+<parameters>
+  // Generic ========================================================
+  cbg_ = this-\>create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+  rclcpp::SubscriptionOptions options;
+  options.callback_group = cbg_;
+
+<constructor>
+  RCLCPP_INFO(get_logger(), \"Supervisor ready.\");
+  timer_ = create_wall_timer(2s, std::bind(&Supervisor::start, this));
+}
+
+void <CLASS_NAME>::start()
+{
+  timer_-\>cancel();
+
+  {
+    std::unique_lock\<std::mutex\> lock(abort_mtx_);
+    aborted_ = false;
+  }
+
+<startUp[..-2]>
+
+  if (started)
+    started();
+
+  return;
+}
+
+void <CLASS_NAME>::abort()
+{
+  {
+    std::unique_lock\<std::mutex\> lock(abort_mtx_);
+    aborted_ = true;
+  }
+
+  if (task_thread_.joinable())
+    task_thread_.join();
+}
+
+<methods>
+");
+
+  loc header_filename = INCLUDE_DIR + "<uncapitalize(CLASS_NAME)>.hh";
+  loc source_filename = SRC_OUTPUT_DIR + "<uncapitalize(CLASS_NAME)>.cc";
+
+  touch(header_filename);
+  touch(source_filename);
+
+  writeFile(header_filename, header);
+  writeFile(source_filename, source);
+
+  return true;
+}
+
+public bool generateMain(str taskId, map[str, str] capMap, Env env)
+{
+  str capabilities = "";
+  for (key <- capMap)
+    capabilities += "  system-\><capMap[key]>.start();\n";
+
+  str source = trim("
+#include \<iostream\>
+#include \<memory\>
+#include \<rclcpp/rclcpp.hpp\>
+
+#include \"<toComponent(taskId)>_task.hh\"
+#include \"<uncapitalize(CLASS_NAME)>.hh\"
+
+std::ostream nullstream(nullptr);
+dzn::runtime runtime;
+dzn::locator locator;
+
+int main(int argc, char* argv[])
+{
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared\<<CLASS_NAME>\>();
+
+  auto system = std::make_shared\<<toComponent(taskId)>_task\>(locator.set(runtime).set(nullstream).set(node));
+
+  system-\>api.out.failed = [] {
+    std::cout \<\< \"Operation failed\" \<\< std::endl;
+  };
+
+<capabilities>
+  node-\>started = [system] { system-\>api.in.start(3.6927, -0.048, 0.0, 2.08, 2.54, 1.55); };
+
+  std::cout \<\< \"Initialized\" \<\< std::endl;
+
+  rclcpp::executors::MultiThreadedExecutor exec;
+  exec.add_node(node);
+  exec.spin();
+
+  std::cout \<\< \"Done\" \<\< std::endl;
+  system-\>api.in.abort();
+
+  rclcpp::shutdown();
+  return 0;
+}
+");
+
+  loc main_filename = SRC_OUTPUT_DIR + "main.cpp";
+  touch(main_filename);
+  writeFile(main_filename, source);
+
+  return true;
+}
+
+public Result generate(\task(str id, list[Argument] args, list[Statement] tstatements), Env env) {
+  println("Generating ROS methods for: <id>");
+
+  // Get the necessary arguments
+  map[str, str] capMap = ();
+  for (arg <- args)
+  {
+    if (\requires(str arg_type, str arg_id) := arg)
+      capMap[arg_type] = arg_id;
+  }
+
+  // Generate capability files
+  generateCapabilities(capMap, env);
+
+  // Get available methods
+
+  // Now, we generate the supervisor
+  generateSupervisor(capMap, env);
+
+  // Finally, we generate the main file
+  generateMain(id, capMap, env);
 
   return <env, "">;
 }
 
-public int generate(koda::AST::System system)
+public Result generate(\capability(str id, list[Argument] args, list[Statement] tstatements), Env env) {
+  println("Generating capability: <id>");
+
+  // Get all the necessary capability info
+  lenv = env;
+  for (s <- tstatements, \tasks_block(_) !:= s)
+  {
+    <lenv, _> = generate(s, lenv);
+    if ("capabilities" in lenv && CapabilityDef task := lenv["capabilities"])
+      env[id] = task;
+  }
+
+  return <env, "">;
+}
+
+
+public int generate(koda::AST::System system, loc output_dir)
 {
+  INCLUDE_DIR = output_dir + "/include";
+  generateDir(INCLUDE_DIR);
+
+  SRC_OUTPUT_DIR = output_dir + "/src";
+  generateDir(SRC_OUTPUT_DIR);
+
   // The ROS component only needs the methods of the different capabilities
   Env env = ();
-  env["supervisor_imports"]     = "";
-  env["supervisor_definitions"]     = "";
-  env["supervisor_members"]         = "";
-  env["supervisor_constructor"]     = "";
-  env["supervisor_implementations"] = "";
 
+  // First we build the capabilities
   for (t <- system.components) {
-    if (\task(_, _, _, false, _) := t)
+    if (\capability(_, _, _) := t)
       <env, _> = generate(t, env);
   }
 
-  println(env["supervisor_definitions"]);
-  println(env["supervisor_implementations"]);
-  println(env["supervisor_members"]);
-  println(env["supervisor_constructor"]);
-
-  // Write supervisor header file
-  str header = trim("
-#pragma once
-
-#include \<chrono\>
-#include \<functional\>
-#include \<memory\>
-#include \<string\>
-
-#include \"rclcpp/rclcpp.hpp\"
-#include \<rclcpp_action/rclcpp_action.hpp\>
-
-<env["supervisor_imports"]>
-
-class Supervisor : public rclcpp::Node
-{
-public:
-  Supervisor();
-
-  <env["supervisor_definitions"]>
-
-private:
-  <env["supervisor_members"]>
-};");
-
-
-  // Write supervisor source file
-  str source = trim("
-#include \"supervisor.hh\"
-
-#include \<algorithm\>
-#include \<chrono\>
-
-Supervisor::Supervisor()
-    : Node(\"supervisor\")
-{
-  <env["supervisor_constructor"]>
-}
-
-geometry_msgs::msg::Quaternion yawToQuat(double yaw) {
-  geometry_msgs::msg::Quaternion q;
-  // roll = pitch = 0
-  double cy = std::cos(yaw * 0.5);
-  double sy = std::sin(yaw * 0.5);
-  q.x = 0.0;
-  q.y = 0.0;
-  q.z = sy;
-  q.w = cy;
-  return q;
-}
-
-<env["supervisor_implementations"]>
-");
-
-  loc header_filename = OUTPUT_DIR + "supervisor.hh";
-  loc source_filename = OUTPUT_DIR + "supervisor.cc";
-
-  touch(header_filename);
-  touch(source_filename);
-
-  writeFile(header_filename, header);
-  writeFile(source_filename, source);
+    for (t <- system.components) {
+    if (\task(_, _, _) := t)
+      <env, _> = generate(t, env);
+  }
 
   return 0;
 }
@@ -542,7 +1067,5 @@ public int testGeneration(loc source, loc output_dir)
   src = koda::Parser::parsekoda(source);
   ast = koda::CST2AST::cst2ast(src);
 
-  OUTPUT_DIR = output_dir;
-
-  return generate(ast);
+  return generate(ast, output_dir);
 }
