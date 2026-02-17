@@ -3,35 +3,12 @@ module koda::ROSGenerator
 import koda::AST;
 import koda::Parser;
 import koda::CST2AST;
+import koda::Types;
 
 import IO;
 import List;
 import String;
 import vis::Text;
-
-alias Env = map[str, value];
-alias Result = tuple[Env, value];
-
-// This represents a single dezyne call
-data CallTpl
-  = ctpl(str name, list[Argument] arguments, str ret)
-  | empty_ctpl()
-  ;
-
-// These represent a capability, for example, for action, topic, or service
-data CapabilityDef = capDef(
-  str name, str ttype, str msg,
-  CallTpl trigger,
-  CallTpl onReturn,
-  CallTpl onError,
-  CallTpl onAbort
-);
-
-data CapabilityData
-  = capData(str includes, str members, str methods, str parameters, str constructor, str startUp,
-            list[str] deps, list[str] packageDeps, list[str] configParam)
-  | empty_data()
-  ;
 
 loc BASE_DIR = |project://koda/generated/|;
 loc INCLUDE_DIR = |project://koda/generated/include|;
@@ -731,58 +708,6 @@ public CapabilityData generateGrip(str key, CapabilityDef cap)
   return capData(includes, members, methods, parameters, constructor, startUp, deps, packageDeps, configParam);
 }
 
-// =============================================================
-// Helpers
-void generateDir(loc output)
-{
-  if (exists(output))
-    return;
-
-  mkDirectory(output);
-}
-
-str clean(value val)
-  = replaceAll("<val>", "\"", "");
-
-str toComponent(str name)
-  = "c" + uncapitalize(replaceAll(name, " ", ""));
-
-str toInterface(str name)
-  = "i" + uncapitalize(replaceAll(name, " ", ""));
-
-str toVariable(str name)
-  = uncapitalize(replaceAll(name, " ", ""));
-
-str toFilename(str name)
-  = replaceAll(name, " ", "");
-
-// =============================================================
-// Argument
-str argsToString(list[Argument] args)
-{
-  return "<for (i <- [0..size(args)]){><argToString(args[i])><if(i < size(args) - 1){>, <}><}>";
-}
-
-str argToString(Argument arg)
-{
-  if (\arg(str arg_type, str arg_id) := arg)
-    return "<arg_type> <arg_id>";
-
-  return "";
-}
-
-str argIdToString(Argument arg)
-{
-  if (\arg(str _, str arg_id) := arg)
-    return "<arg_id>";
-
-  return "";
-}
-
-str argsIdToString(list[Argument] args)
-{
-  return return "<for (i <- [0..size(args)]){><argIdToString(args[i])><if(i < size(args) - 1){>, <}><}>";;
-}
 // ============================================================
 // EventDefStatement
 public CallTpl generate(\event(str return_type, str id, list[Argument] args, list[EventDefComponent] _))
@@ -896,7 +821,6 @@ public Result generate(\ros_def(RosDefStatement statement), Env env)
 
 public Result generate(\tasks_block(list[Flow] flows), Env env) {
   println("\tasks_block <flows>");
-  str output = "";
   return <env, "">;
 }
 
@@ -1296,7 +1220,6 @@ public Result generate(\capability(str id, list[Argument] args, list[Statement] 
 
   return <env, "">;
 }
-
 
 public int generate(koda::AST::System system, loc output_dir)
 {

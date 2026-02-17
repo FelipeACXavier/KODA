@@ -33,6 +33,15 @@ capability Initialpose() {
   }
 }
 
+capability Approachdepart() {
+  action "/initialpose" "std_msgs::String" {
+    trigger: void set_position();
+    abort: void cancel();
+    return: void position_set();
+    error: void failed();
+  }
+}
+
 task PickAndDrop (drive req Drive, vision req Vision, 
                   grip req Grip, initialpose req Initialpose,
                   float x1, float y1, float x2, float y2, float yaw1, float yaw2) 

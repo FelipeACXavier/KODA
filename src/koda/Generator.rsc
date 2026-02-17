@@ -1,10 +1,12 @@
 module koda::Generator
 
 import koda::AST;
+import koda::Types;
 import koda::Parser;
 import koda::CST2AST;
 import koda::Automaton;
 import koda::ROSGenerator;
+import koda::IoTGenerator;
 
 import IO;
 import Map;
@@ -15,25 +17,25 @@ import Boolean;
 
 // =============================================================
 // Data formats
-data EventTpl
-  = etpl(str name, list[str] args, str ret)
-  | empty_etpl()
-  ;
+// data EventTpl
+//   = etpl(str name, list[str] args, str ret)
+//   | empty_etpl()
+//   ;
 
-data EventCall
-  = ecall(str name, list[str] args)
-  ;
+// data EventCall
+//   = ecall(str name, list[str] args)
+//   ;
 
-data TaskDef = taskDef(
-  str name, list[str] formals, str ttype,
-  EventTpl trigger,
-  EventTpl onReturn, EventTpl onError, EventTpl onAbort,
-  map[str,EventTpl] accepts, map[str,EventTpl] emits
-);
+// data TaskDef = taskDef(
+//   str name, list[str] formals, str ttype,
+//   EventTpl trigger,
+//   EventTpl onReturn, EventTpl onError, EventTpl onAbort,
+//   map[str,EventTpl] accepts, map[str,EventTpl] emits
+// );
 
 // alias Env = map[str, value];
-alias CEnv = map[str, TopLevelComponent];
-alias TaskEnv = map[str, TaskDef];
+// alias CEnv = map[str, TopLevelComponent];
+// alias TaskEnv = map[str, TaskDef];
 // alias Result = tuple[Env, value];
 
 // =============================================================
@@ -70,16 +72,6 @@ private tuple[State, State, int] fresh2(int next) {
 public str toString(value val)
   = "<val>";
 
-void generateDir(loc output)
-{
-  if (exists(output))
-    return;
-
-  mkDirectory(output);
-}
-
-str clean(value val)
-  = replaceAll("<val>", "\"", "");
 
 str cleanNewLine(value val)
   = "<val>"[..-1];
@@ -101,19 +93,6 @@ extern pose $const geometry_msgs::msg::PoseStamped&$;
 
   writeFile(OUTPUT_DIR + EXTERNALS, output);
 }
-
-// Conversions
-str toComponent(str name)
-  = "c" + uncapitalize(replaceAll(name, " ", ""));
-
-str toInterface(str name)
-  = "i" + uncapitalize(replaceAll(name, " ", ""));
-
-str toVariable(str name)
-  = uncapitalize(replaceAll(name, " ", ""));
-
-str toFilename(str name)
-  = replaceAll(name, " ", "");
 
 public str argToStr(list[Argument] args, Env env) {
   str out = "";
@@ -2038,14 +2017,21 @@ public int generate(koda::AST::System system)
   return 0;
 }
 
-public int generate(loc source, loc output_dir)
+public int generate(loc source, loc output_dir, str generationType)
 {
   OUTPUT_DIR = output_dir + "/models";
 
   src = koda::Parser::parsekoda(source);
   ast = koda::CST2AST::cst2ast(src);
 
-  koda::ROSGenerator::generate(ast, output_dir + "/ros");
+  if (generationType == "ros") {
+    koda::ROSGenerator::generate(ast, output_dir + "/ros");
+  } else if (generationType == "mqtt") {
+    koda::IoTGenerator::generate(ast, output_dir + "/iot");
+  } else {
+    println("Unknown generation type: <generationType>");
+    return -1;
+  }
 
   return generate(ast);
 }

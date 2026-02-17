@@ -22,23 +22,23 @@ capability EnvSensor() {
   }
 }
 
-capability Lighting(string scene) {
-  service "lighting/scene" "{ \"cmd:\" \"scene\" }" {
+capability Light(string scene) {
+  service "lighting/scene" "{ \"cmd\": \"$scene\" }" {
     in: void set(string scene);
   }
 }
 
-capability Ventilation(boolean up) {
-    action "ventilation" "{ \"cmd:\" \"up\" }" {
-      trigger: void solve(boolean up);
+capability Ventilation(string up) {
+    action "ventilation" "{ \"cmd\": \"$up\" }" {
+      trigger: void solve(string up);
       return: void done();
       abort: void stop();
       error: void failed();
     }
 }
 
-task AirQuality (bridge req Bridge, sensor req Co2Sensor, environ req EnvSensor, 
-                 light req Lighting, hvac req Ventilation, string zone)
+task AirQuality (bridge req Bridge, co2sensor req Co2Sensor, envsensor req EnvSensor, 
+                 light req Light, ventilation req Ventilation, string zone)
 {
   trigger: void start(string zone);
   return:  void done();
@@ -51,21 +51,21 @@ task AirQuality (bridge req Bridge, sensor req Co2Sensor, environ req EnvSensor,
   }
 
   strategy {
-    err:  hvac.abort() --> light.set("Alert") --> end;
-    abrt: hvac.abort() --> end;
+    err:  ventilation.abort() --> light.set("Alert") --> end;
+    abrt: ventilation.abort() --> end;
 
-    ventilation [mode]: within 300 do ( hvac(mode)
+    ventilation [mode]: within 300 do ( ventilation(mode)
           on error err
           on abort abrt
-          on environ.present() ( light.set("On") --> continue )
-          on environ.empty() ( light.set("Off") --> continue )
+          on envsensor.present() ( light.set("On") --> continue )
+          on envsensor.empty() ( light.set("Off") --> continue )
         ) else err;
 
     main: every 10 { bridge.poll(zone_) }
       on abort ( abrt )
-      on environ.present() ( light.set("On") )
-      on environ.empty() ( light.set("Off") )
-      on sensor.high() ( ventilation(true) )
-      on sensor.normal() ( ventilation(false) );
+      on envsensor.present() ( light.set("On") )
+      on envsensor.empty() ( light.set("Off") )
+      on co2sensor.high() ( ventilation("down") )
+      on co2sensor.normal() ( ventilation("up") );
   }
 }
