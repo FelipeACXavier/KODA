@@ -61,6 +61,7 @@ public CapabilityData generateInitialPose(str key, CapabilityDef cap)
 
   // ======================================================================================================
   // Constructor - These are the actions necessary for the correct construction of this capability
+  constructor += "  // InitialPose ========================================================================== \n";
   constructor += "  initialpose_pub_ = create_publisher\<geometry_msgs::msg::PoseWithCovarianceStamped\>(\"/initialpose\", 10);\n";
   constructor += "  amcl_pose_sub_ = create_subscription\<geometry_msgs::msg::PoseWithCovarianceStamped\>(\"/amcl_pose\", 10,\n";
   constructor += "   [this](const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr) {\n";
@@ -83,54 +84,63 @@ public CapabilityData generateInitialPose(str key, CapabilityDef cap)
 
   // ======================================================================================================
   // Methods - Here we add any methods that this capability might add to the supervisor
-  methods += "void <CLASS_NAME>::<key>Trigger()\n";
-  methods += "{\n";
-  methods += "  const auto map_frame = get_parameter(\"map_frame\").as_string();\n";
-  methods += "  const double x = get_parameter(\"initial_x\").as_double();\n";
-  methods += "  const double y = get_parameter(\"initial_y\").as_double();\n";
-  methods += "  const double yaw = get_parameter(\"initial_yaw\").as_double();\n\n";
+  if (ctpl(str _, list[Argument] _, str ret) := cap.trigger)
+  {
+    methods += "<ret> <CLASS_NAME>::<key>Trigger()\n";
+    methods += "{\n";
+    methods += "  const auto map_frame = get_parameter(\"map_frame\").as_string();\n";
+    methods += "  const double x = get_parameter(\"initial_x\").as_double();\n";
+    methods += "  const double y = get_parameter(\"initial_y\").as_double();\n";
+    methods += "  const double yaw = get_parameter(\"initial_yaw\").as_double();\n\n";
 
-  methods += "  geometry_msgs::msg::PoseWithCovarianceStamped msg;\n";
-  methods += "  msg.header.stamp = now();\n";
-  methods += "  msg.header.frame_id = map_frame;\n";
-  methods += "  msg.pose.pose.position.x = x;\n";
-  methods += "  msg.pose.pose.position.y = y;\n";
-  methods += "  msg.pose.pose.position.z = 0.0;\n\n";
+    methods += "  geometry_msgs::msg::PoseWithCovarianceStamped msg;\n";
+    methods += "  msg.header.stamp = now();\n";
+    methods += "  msg.header.frame_id = map_frame;\n";
+    methods += "  msg.pose.pose.position.x = x;\n";
+    methods += "  msg.pose.pose.position.y = y;\n";
+    methods += "  msg.pose.pose.position.z = 0.0;\n\n";
 
-  methods += "  tf2::Quaternion q;\n";
-  methods += "  q.setRPY(0, 0, yaw);\n";
-  methods += "  msg.pose.pose.orientation = tf2::toMsg(q);\n\n";
+    methods += "  tf2::Quaternion q;\n";
+    methods += "  q.setRPY(0, 0, yaw);\n";
+    methods += "  msg.pose.pose.orientation = tf2::toMsg(q);\n\n";
 
-  methods += "  const double var_xy = 0.25 * 0.25;\n";
-  methods += "  const double var_yaw = (10.0 * M_PI / 180.0) * (10.0 * M_PI / 180.0);\n";
-  methods += "  for (double& c : msg.pose.covariance)\n";
-  methods += "    c = 0.0;\n";
-  methods += "  msg.pose.covariance[0] = var_xy;\n";
-  methods += "  msg.pose.covariance[7] = var_xy;\n";
-  methods += "  msg.pose.covariance[35] = var_yaw;\n\n";
+    methods += "  const double var_xy = 0.25 * 0.25;\n";
+    methods += "  const double var_yaw = (10.0 * M_PI / 180.0) * (10.0 * M_PI / 180.0);\n";
+    methods += "  for (double& c : msg.pose.covariance)\n";
+    methods += "    c = 0.0;\n";
+    methods += "  msg.pose.covariance[0] = var_xy;\n";
+    methods += "  msg.pose.covariance[7] = var_xy;\n";
+    methods += "  msg.pose.covariance[35] = var_yaw;\n\n";
 
-  methods += "  RCLCPP_INFO(get_logger(), \"Publishing initial pose at (%.2f, %.2f, yaw=%.2f rad) in %s.\", x, y, yaw, map_frame.c_str());\n";
-  methods += "  for (int i = 0; i \< 10; ++i) {\n";
-  methods += "    msg.header.stamp = now();\n";
-  methods += "    initialpose_pub_-\>publish(msg);\n";
-  methods += "    rclcpp::sleep_for(std::chrono::milliseconds(100));\n";
-  methods += "  }\n\n";
+    methods += "  RCLCPP_INFO(get_logger(), \"Publishing initial pose at (%.2f, %.2f, yaw=%.2f rad) in %s.\", x, y, yaw, map_frame.c_str());\n";
+    methods += "  for (int i = 0; i \< 10; ++i) {\n";
+    methods += "    msg.header.stamp = now();\n";
+    methods += "    initialpose_pub_-\>publish(msg);\n";
+    methods += "    rclcpp::sleep_for(std::chrono::milliseconds(100));\n";
+    methods += "  }\n\n";
 
-  methods += "  auto deadline = now() + rclcpp::Duration::from_seconds(2.0);\n";
-  methods += "  while (!got_amcl_pose_.load() && now() \< deadline) {\n";
-  methods += "    rclcpp::sleep_for(std::chrono::milliseconds(50));\n";
-  methods += "  }\n\n";
+    methods += "  if (task_thread_.joinable())\n";
+    methods += "    task_thread_.join();\n";
 
-  methods += "  if (got_amcl_pose_.load()) {\n";
-  methods += "    RCLCPP_INFO(get_logger(), \"AMCL pose received after initialpose publish.\");\n";
-  methods += "    if (<key>_position_set)\n";
-  methods += "      <key>_position_set();\n";
-  methods += "  } else {\n";
-  methods += "    RCLCPP_WARN(get_logger(), \"No /amcl_pose observed yet; continuing anyway.\");\n";
-  methods += "    if (<key>_failed)\n";
-  methods += "      <key>_failed();\n";
-  methods += "  }\n";
-  methods += "}\n";
+    methods += "  task_thread_ = std::thread([this] {\n";
+    methods += "    auto deadline = now() + rclcpp::Duration::from_seconds(2.0);\n";
+    methods += "    while (!got_amcl_pose_.load() && now() \< deadline) {\n";
+    methods += "      rclcpp::sleep_for(std::chrono::milliseconds(50));\n";
+    methods += "    }\n\n";
+
+    methods += "    if (got_amcl_pose_.load()) {\n";
+    methods += "      RCLCPP_INFO(get_logger(), \"AMCL pose received after initialpose publish.\");\n";
+    methods += "      rclcpp::sleep_for(std::chrono::milliseconds(2000));\n";
+    methods += "      if (<key>_position_set)\n";
+    methods += "        <key>_position_set();\n";
+    methods += "    } else {\n";
+    methods += "      RCLCPP_WARN(get_logger(), \"No /amcl_pose observed yet; continuing anyway.\");\n";
+    methods += "      if (<key>_failed)\n";
+    methods += "        <key>_failed();\n";
+    methods += "    }\n";
+    methods += "  });\n";
+    methods += "}\n";
+  }
 
   return capData(includes, members, methods, parameters, constructor, startUp);
 }
@@ -164,7 +174,6 @@ public CapabilityData generateDrive(str key, CapabilityDef cap)
   // ======================================================================================================
   // Parameters - These are the paramaters needed for this capability
   parameters += "  // Drive ========================================================================== \n";
-  parameters += "  declare_parameter\<std::string\>(\"map_frame\", \"map\");\n\n";
 
   // ======================================================================================================
   // Start - Here we add any start up actions needed by this capability
@@ -664,8 +673,10 @@ public bool generateCapability(str id, CapabilityDef cap)
   str methodsDef = "";
   str methodsImpl = "";
   str callbacks = "";
+  println("[ROSGenerator] Trying to generate ROS class: <id>");
   if (ctpl(str name, list[Argument] args, str ret) := cap.trigger)
   {
+    println("[ROSGenerator]   ROS class: <id> has a trigger");
     str arguments = argsToString(args);
     methodsDef += "  <ret> <id>_<name>(<arguments>) override;\n";
 
@@ -675,20 +686,27 @@ public bool generateCapability(str id, CapabilityDef cap)
     methodsImpl += "  {\n";
     methodsImpl += "    std::cout \<\< \"Failed to retrieve the <CLASS_NAME>\" \<\< std::endl;\n";
     methodsImpl += "    return;\n";
-    methodsImpl += "  }\n";
+    methodsImpl += "  }\n\n";
+    methodsImpl += "  std::cout \<\< \"Triggering: <id>Trigger\" \<\< std::endl;\n";
     methodsImpl += "  supervisor-\><id>Trigger(<argsIdToString(args)>);\n";
     methodsImpl += "}\n\n";
 
     if (ctpl(str retName, list[Argument] retArgs, str _) := cap.onReturn) {
+      println("[ROSGenerator]   ROS class: <id> has a return");
       callbacks += "  supervisor-\><id>_<retName> = [this](<argsToString(retArgs)>) {\n";
       callbacks += "    auto& pump = dzn_locator.get\<dzn::pump\>();\n";
-      callbacks += "    pump([this<if (size(retArgs) > 0){>, <}><argsIdToString(retArgs)>] { <id>_<retName>(<argsIdToString(retArgs)>); });\n";
+      callbacks += "    pump([this<if (size(retArgs) > 0){>, <}><argsIdToString(retArgs)>] {\n";
+      callbacks += "     std::cout \<\< \"Before <id>_<retName>\" \<\< std::endl;\n";
+      callbacks += "     <id>_<retName>(<argsIdToString(retArgs)>);\n";
+      callbacks += "     std::cout \<\< \"After <id>_<retName>\" \<\< std::endl;\n";
+      callbacks += "    });\n";
       callbacks += "  };\n";
     }
   }
 
   if (ctpl(str name, list[Argument] args, str ret) := cap.onAbort)
   {
+    println("[ROSGenerator]   ROS class: <id> has a abort");
     str arguments = argsToString(args);
     methodsDef += "  <ret> <id>_<name>(<arguments>) override;\n";
 
@@ -703,9 +721,14 @@ public bool generateCapability(str id, CapabilityDef cap)
     methodsImpl += "}\n\n";
 
     if (ctpl(str retName, list[Argument] retArgs, str _) := cap.onError) {
+      println("[ROSGenerator]   ROS class: <id> has a error");
       callbacks += "  supervisor-\><id>_<retName> = [this](<argsToString(retArgs)>) {\n";
       callbacks += "    auto& pump = dzn_locator.get\<dzn::pump\>();\n";
-      callbacks += "    pump([this<if (size(retArgs) > 0){>, <}><argsIdToString(retArgs)>] { <id>_<retName>(<argsIdToString(retArgs)>); });\n";
+      callbacks += "    pump([this<if (size(retArgs) > 0){>, <}><argsIdToString(retArgs)>] {\n";
+      callbacks += "     std::cout \<\< \"Before <id>_<retName>\" \<\< std::endl;\n";
+      callbacks += "     <id>_<retName>(<argsIdToString(retArgs)>);\n";
+      callbacks += "     std::cout \<\< \"After <id>_<retName>\" \<\< std::endl;\n";
+      callbacks += "    });\n";
       callbacks += "  };\n";
     }
   }
@@ -777,10 +800,7 @@ public bool generateCapabilities(map[str, str] capMap, Env env)
   for (key <- capMap)
   {
     if (key in env && CapabilityDef cap := env[key])
-    {
-      println("Generating capability: <key> -\> <capMap[key]>\nCap:\n <cap>");
       generateCapability(capMap[key], cap);
-    }
   }
 
   return true;
@@ -803,7 +823,6 @@ public bool generateSupervisor(map[str, str] capMap, Env env)
   {
     if (key in env && CapabilityDef cap := env[key])
     {
-      println("Gathering capability: <key> -\> <capMap[key]>\nCap:\n <cap>");
       if (ctpl(str _, list[Argument] args, str ret) := cap.trigger)
       {
         capTriggers += "  // <key> ===============================================\n";
