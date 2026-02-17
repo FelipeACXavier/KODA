@@ -28,13 +28,178 @@ data CapabilityDef = capDef(
 );
 
 data CapabilityData
-  = capData(str includes, str members, str methods, str parameters, str constructor, str startUp)
+  = capData(str includes, str members, str methods, str parameters, str constructor, str startUp,
+            list[str] deps, list[str] packageDeps, list[str] configParam)
   | empty_data()
   ;
 
+loc BASE_DIR = |project://koda/generated/|;
 loc INCLUDE_DIR = |project://koda/generated/include|;
 loc SRC_OUTPUT_DIR = |project://koda/generated/source|;
 str CLASS_NAME = "Supervisor";
+str PARAMETER_DIR = "config";
+str PARAMETER_FILE = "params.yaml";
+
+// =============================================================
+// Support files
+public void generateCMakeLists(str packageName, list[str] deps)
+{
+  str output = trim("
+cmake_minimum_required(VERSION 3.8)
+project(<toLowerCase(packageName)>)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} -g\")
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES \"Clang\")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# find dependencies
+find_package(ament_cmake REQUIRED)
+
+# Added
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
+<for (dep <- deps){>
+find_package(<dep> REQUIRED)<}>
+
+file(GLOB SOURCES \"${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc\")
+add_executable(${PROJECT_NAME}
+  src/main.cpp
+  ${SOURCES}
+)
+
+ament_target_dependencies(${PROJECT_NAME}<for (dep <- deps){>
+  <dep><}>
+)
+
+# Add include directories so .hh files can be found
+target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/dzn
+)
+
+install(TARGETS
+  ${PROJECT_NAME}
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY config launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  # the following line skips the linter which checks for copyrights
+  # comment the line when a copyright and license is added to all source files
+  set(ament_cmake_copyright_FOUND TRUE)
+  # the following line skips cpplint (only works in a git repo)
+  # comment the line when this package is in a git repo and when
+  # a copyright and license is added to all source files
+  set(ament_cmake_cpplint_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_export_include_directories(include)
+ament_package()
+");
+
+  loc filename = BASE_DIR + "CMakeLists.txt";
+  touch(filename);
+  writeFile(filename, output);
+}
+
+public void generatePackage(str packageName, list[str] deps)
+{
+    str output = trim("
+\<?xml version=\"1.0\"?\>
+\<?xml-model href=\"http://download.ros.org/schema/package_format3.xsd\" schematypens=\"http://www.w3.org/2001/XMLSchema\"?\>
+\<package format=\"3\"\>
+  \<name\><toLowerCase(packageName)>\</name\>
+  \<version\>0.0.0\</version\>
+  \<description\>TODO\</description\>
+  \<maintainer email=\"todo@todo.com\"\>TODO\</maintainer\>
+  \<license\>Apache-2.0\</license\>
+
+  \<buildtool_depend\>ament_cmake\</buildtool_depend\>
+
+  \<test_depend\>ament_lint_auto\</test_depend\>
+  \<test_depend\>ament_lint_common\</test_depend\>
+
+  \<depend\>rclcpp\</depend\>
+  \<depend\>rclcpp_action\</depend\>
+<for (dep <- deps){>
+  \<depend\><dep>\</depend\><}>
+
+  \<exec_depend\>ros2launch\</exec_depend\>
+
+  \<export\>
+    \<build_type\>ament_cmake\</build_type\>
+  \</export\>
+\</package\>
+
+");
+
+  loc filename = BASE_DIR + "package.xml";
+  touch(filename);
+  writeFile(filename, output);
+}
+
+public void generateLaunch(str packageName)
+{
+    str output = trim("
+import os
+from pathlib import Path
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+
+def generate_launch_description():
+    pkg_share = Path(get_package_share_directory(\'<toLowerCase(packageName)>\'))
+    params = str(pkg_share / \'<PARAMETER_DIR>\' / \'<PARAMETER_FILE>\')
+    return LaunchDescription([
+        Node(
+            package=\'<toLowerCase(packageName)>\',
+            executable=\'<toLowerCase(packageName)>\',
+            name=\'<uncapitalize(CLASS_NAME)>\',
+            output=\'screen\',
+            parameters=[params]
+        )
+    ])
+");
+
+  loc filename = BASE_DIR + "/launch/default.launch.py";
+  touch(filename);
+  writeFile(filename, output);
+}
+
+public void generateParameters(list[str] parameters)
+{
+    str output = trim("
+<uncapitalize(CLASS_NAME)>:
+  ros__parameters:<for (param <- parameters){>
+    <param><}>
+");
+
+  loc filename = BASE_DIR + "/<PARAMETER_DIR>/<PARAMETER_FILE>";
+  touch(filename);
+  writeFile(filename, output);
+}
 
 // =============================================================
 // Capability nodes
@@ -46,6 +211,17 @@ public CapabilityData generateInitialPose(str key, CapabilityDef cap)
   str parameters = "";
   str constructor = "";
   str startUp = "";
+  list[str] deps = [];
+  list[str] packageDeps = [];
+  list[str] configParam = [];
+
+  // ======================================================================================================
+  // Include dependencies
+  deps += "geometry_msgs";
+
+  // ======================================================================================================
+  // Package xml dependencies
+  packageDeps += "geometry_msgs";
 
   // ======================================================================================================
   // Includes - These are the necessary headers
@@ -78,6 +254,12 @@ public CapabilityData generateInitialPose(str key, CapabilityDef cap)
   parameters += "  declare_parameter\<double\>(\"initial_x\", 0.0);\n";
   parameters += "  declare_parameter\<double\>(\"initial_y\", 0.0);\n";
   parameters += "  declare_parameter\<double\>(\"initial_yaw\", 0.0);\n\n";
+
+  configParam += "from_start: true";
+  configParam += "map_frame: map";
+  configParam += "initial_x: -0.0252";
+  configParam += "initial_y: -0.0276";
+  configParam += "initial_yaw: 0.0";
 
   // ======================================================================================================
   // Start - Here we add any start up actions needed by this capability
@@ -142,7 +324,7 @@ public CapabilityData generateInitialPose(str key, CapabilityDef cap)
     methods += "}\n";
   }
 
-  return capData(includes, members, methods, parameters, constructor, startUp);
+  return capData(includes, members, methods, parameters, constructor, startUp,deps, packageDeps, configParam);
 }
 
 public CapabilityData generateDrive(str key, CapabilityDef cap)
@@ -153,6 +335,21 @@ public CapabilityData generateDrive(str key, CapabilityDef cap)
   str parameters = "";
   str constructor = "";
   str startUp = "";
+  list[str] deps = [];
+  list[str] packageDeps = [];
+  list[str] configParam = [];
+
+  // ======================================================================================================
+  // Include dependencies
+  deps += "nav2_msgs";
+  deps += "control_msgs";
+  deps += "trajectory_msgs";
+
+  // ======================================================================================================
+  // Package xml dependencies
+  packageDeps += "nav2_msgs";
+  packageDeps += "control_msgs";
+  packageDeps += "trajectory_msgs";
 
   // ======================================================================================================
   // Includes - These are the necessary headers
@@ -221,7 +418,7 @@ public CapabilityData generateDrive(str key, CapabilityDef cap)
     methods += "}\n\n";
   }
 
-  return capData(includes, members, methods, parameters, constructor, startUp);
+  return capData(includes, members, methods, parameters, constructor, startUp, deps, packageDeps, configParam);
 }
 
 public CapabilityData generateVision(str key, CapabilityDef cap)
@@ -232,6 +429,21 @@ public CapabilityData generateVision(str key, CapabilityDef cap)
   str parameters = "";
   str constructor = "";
   str startUp = "";
+  list[str] deps = [];
+  list[str] packageDeps = [];
+  list[str] configParam = [];
+
+  // ======================================================================================================
+  // Include dependencies
+  deps += "cv_bridge";
+  deps += "OpenCV";
+  deps += "sensor_msgs";
+
+  // ======================================================================================================
+  // Package xml dependencies
+  packageDeps += "cv_bridge";
+  packageDeps += "opencv";
+  packageDeps += "sensor_msgs";
 
   // ======================================================================================================
   // Includes - These are the necessary headers
@@ -269,6 +481,10 @@ public CapabilityData generateVision(str key, CapabilityDef cap)
   parameters += "  declare_parameter\<double\>(\"aruco_size_m\", 0.08);\n";
   parameters += "  declare_parameter\<double\>(\"arrival_tolerance_m\", 0.30);\n";
   parameters += "  declare_parameter\<double\>(\"aruco_timeout_s\", 15.0);\n\n";
+
+  configParam += "aruco_size_m: 0.08";
+  configParam += "arrival_tolerance_m: 0.30";
+  configParam += "aruco_timeout_s: 15.0";
 
   // ======================================================================================================
   // Start - Here we add any start up actions needed by this capability
@@ -346,7 +562,7 @@ public CapabilityData generateVision(str key, CapabilityDef cap)
   methods += "  img_cv_.notify_all();\n";
   methods += "}\n\n";
 
-  return capData(includes, members, methods, parameters, constructor, startUp);
+  return capData(includes, members, methods, parameters, constructor, startUp, deps, packageDeps, configParam);
 }
 
 public CapabilityData generateGrip(str key, CapabilityDef cap)
@@ -357,6 +573,19 @@ public CapabilityData generateGrip(str key, CapabilityDef cap)
   str parameters = "";
   str constructor = "";
   str startUp = "";
+  list[str] deps = [];
+  list[str] packageDeps = [];
+  list[str] configParam = [];
+
+  // ======================================================================================================
+  // Include dependencies
+  deps += "moveit_ros_planning_interface";
+  deps += "tf2_geometry_msgs";
+
+  // ======================================================================================================
+  // Package xml dependencies
+  packageDeps += "moveit_ros_planning_interface";
+  packageDeps += "tf2_geometry_msgs";
 
   // ======================================================================================================
   // Includes - These are the necessary headers
@@ -381,6 +610,12 @@ public CapabilityData generateGrip(str key, CapabilityDef cap)
   parameters += "  declare_parameter\<std::vector\<double\>\>(\"drive_pose\", {-0.068, 0.0, 0.26});\n";
   parameters += "  declare_parameter\<std::string\>(\"arm_group\", \"arm\");\n";
   parameters += "  declare_parameter\<std::string\>(\"eef_link\", \"end_effector_link\");\n\n";
+
+  configParam += "arm_group: \"arm\"";
+  configParam += "eef_link: \"end_effector_link\"";
+  configParam += "drive_pose: [-0.068, 0.0, 0.26]";
+  configParam += "target_offset_xyz: [0.18, 0.0, 0.2]";
+  configParam += "target_offset_rpy: [0.0, 0.0, 0.03]";
 
   // ======================================================================================================
   // Start - Here we add any start up actions needed by this capability
@@ -493,7 +728,7 @@ public CapabilityData generateGrip(str key, CapabilityDef cap)
   methods += "  return true;\n";
   methods += "}\n";
 
-  return capData(includes, members, methods, parameters, constructor, startUp);
+  return capData(includes, members, methods, parameters, constructor, startUp, deps, packageDeps, configParam);
 }
 
 // =============================================================
@@ -779,8 +1014,6 @@ void <toComponent(id)>::start()
 <methodsImpl>
 ;");
 
-  // println(header);
-  // println(source);
   loc header_filename = INCLUDE_DIR + "<toComponent(id)>.hh";
   loc source_filename = SRC_OUTPUT_DIR + "<toComponent(id)>.cc";
 
@@ -806,7 +1039,7 @@ public bool generateCapabilities(map[str, str] capMap, Env env)
   return true;
 }
 
-public bool generateSupervisor(map[str, str] capMap, Env env)
+public bool generateSupervisor(str taskId, map[str, str] capMap, Env env)
 {
   str capTriggers = "";
   str capCallbacks = "// Callbacks ========================================================\n";
@@ -818,6 +1051,9 @@ public bool generateSupervisor(map[str, str] capMap, Env env)
   str parameters = "";
   str constructor = "";
   str startUp = "";
+  list[str] deps = [];
+  list[str] packageDeps = [];
+  list[str] configParam = [];
 
   for (key <- capMap)
   {
@@ -855,6 +1091,9 @@ public bool generateSupervisor(map[str, str] capMap, Env env)
       parameters += cData.parameters;
       constructor += cData.constructor;
       startUp += cData.startUp;
+      deps += cData.deps;
+      packageDeps += cData.packageDeps;
+      configParam += cData.configParam;
     }
 
   }
@@ -959,6 +1198,11 @@ void <CLASS_NAME>::abort()
   writeFile(header_filename, header);
   writeFile(source_filename, source);
 
+  generateCMakeLists(taskId, deps);
+  generatePackage(taskId, packageDeps);
+  generateLaunch(taskId);
+  generateParameters(configParam);
+
   return true;
 }
 
@@ -1029,10 +1273,8 @@ public Result generate(\task(str id, list[Argument] args, list[Statement] tstate
   // Generate capability files
   generateCapabilities(capMap, env);
 
-  // Get available methods
-
   // Now, we generate the supervisor
-  generateSupervisor(capMap, env);
+  generateSupervisor(id, capMap, env);
 
   // Finally, we generate the main file
   generateMain(id, capMap, env);
@@ -1058,10 +1300,11 @@ public Result generate(\capability(str id, list[Argument] args, list[Statement] 
 
 public int generate(koda::AST::System system, loc output_dir)
 {
-  INCLUDE_DIR = output_dir + "/include";
+  BASE_DIR = output_dir;
+  INCLUDE_DIR = BASE_DIR + "/include";
   generateDir(INCLUDE_DIR);
 
-  SRC_OUTPUT_DIR = output_dir + "/src";
+  SRC_OUTPUT_DIR = BASE_DIR + "/src";
   generateDir(SRC_OUTPUT_DIR);
 
   // The ROS component only needs the methods of the different capabilities
