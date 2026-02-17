@@ -1,5 +1,5 @@
 capability Bridge(string zone) {
-  service "/poll" ""{
+  service "poll" ""{
     in: void poll(string scene);
   }
 }
@@ -23,13 +23,13 @@ capability EnvSensor() {
 }
 
 capability Light(string scene) {
-  service "lighting/scene" "{ \"cmd\": \"$scene\" }" {
+  service "lighting/scene" "" {
     in: void set(string scene);
   }
 }
 
 capability Ventilation(string up) {
-    action "ventilation" "{ \"cmd\": \"$up\" }" {
+    action "ventilation" "" {
       trigger: void solve(string up);
       return: void done();
       abort: void stop();

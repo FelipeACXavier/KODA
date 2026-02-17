@@ -1,5 +1,5 @@
 capability Conveyor() {
-  action "/arm_" "float"{
+  action "conveyor" ""{
     trigger:  void move();
     abort:    void stop();
     return:   void done();
@@ -8,7 +8,7 @@ capability Conveyor() {
 }
 
 capability RobotArm(string pick) {
-  action "/arm_" "float"{
+  action "arm" "" {
     trigger:  void act(string pick);
     abort:    void stop();
     return:   void done();
@@ -16,35 +16,26 @@ capability RobotArm(string pick) {
   }
 }
 
-// capability ImageInspector() {
-//  action "level${id}" "float"{
-//    trigger: void inspect();
-//     abort: void stop();
-//    return: void success();
-//    error: void failed();
-//  }
-// }
-
 capability ImageInspector() {
-  service "/conveyor_start" "float"{
+  service "image/start" ""{
     in: void start();
   }
-  service "/conveyor_start" "float"{
+  service "image/stop" ""{
     in: void stop();
   }
-  service "/conveyor_start" "float"{
+  service "image/invalid" ""{
     out: void invalid();
   }
 }
 
 capability SensorModule() {
-  service "/conveyor_start" "float"{
+  service "poll" ""{
     in: void poll();
   }
 }
 
 capability Ticket() {
-  service "/conveyor_start" "float"{
+  service "ticket/create" ""{
     in: void create();
   }
 }

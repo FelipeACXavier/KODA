@@ -29,20 +29,38 @@ str argsToMQTT(str template, list[Argument] args)
   if (isEmpty(args))
     return "\"\"";
 
-  for (arg <- args)
+  for (arg <- args, \arg(str arg_type, str arg_id) := arg)
   {
-    if (\arg(str arg_type, str arg_id) := arg)
-    {
-      if (arg_type != "string")
-        template = replaceAll(template, "$<arg_id>", "\" + std::to_string(<arg_id>) + \"");
-      else
-        template = replaceAll(template, "$<arg_id>", "\" + <arg_id> + \"");
-    }
+    str extra = "";
+    if (arg_type != "string")
+      extra = "std::to_string(<arg_id>)";
+    else
+      extra = "<arg_id>";
+
+    template = "\"{ \\\"cmd\\\": \\\"\" + <extra> + \"\\\" }\"";
   }
 
   return template;
 }
 
+str defaultForArgs(list[Argument] args)
+{
+  if (isEmpty(args))
+    return "";
+
+  str template = "";
+  for (arg <- args, \arg(str arg_type, str arg_id) := arg)
+  {
+    if (arg_type == "string")
+      template += "\"\", ";
+    else if (arg_type == "boolean")
+      template += "false, ";
+    else
+      template += "0, ";
+  }
+
+  return template[..-2];
+}
 // =============================================================
 // Support files
 public void generateCMakeLists(str packageName, list[str] deps)
@@ -175,7 +193,8 @@ public tuple[Env, CapabilityDef] generate(\topic(str topic, str msg, list[RosDef
 public tuple[Env, CapabilityDef] generate(\ros_def(RosDefStatement statement), Env env)
 {
   println("  ros_def <statement>");
-  return <env, empty_cdef()>;
+  capDefinition = capDef("action", "", "", empty_ctpl(), empty_ctpl(), empty_ctpl(), empty_ctpl());
+  return generate(statement, capDefinition, env);
 }
 
 public tuple[Env, CapabilityDef] generate(\tasks_block(list[Flow] flows), Env env) {
@@ -477,11 +496,30 @@ void <CLASS_NAME>::publish(const std::string& topic, const std::string& msg)
   return true;
 }
 
-public bool generateMain(str taskId, map[str, str] capMap, Env env)
+public bool generateMain(str taskId, map[str, str] capMap, CapabilityDef taskCap, Env env)
 {
   str capabilities = "";
   for (key <- capMap)
     capabilities += "  system-\><capMap[key]>.start();\n";
+
+  str callbacks = "";
+  if (ctpl(str name, list[Argument] args, str _) := taskCap.trigger)
+  {
+    callbacks += "  <toLowerCase(CLASS_NAME)>.register_handler(\"<name>\", [&system](const std::string& data) {\n";
+    callbacks += "    system-\>api.in.<name>(<defaultForArgs(args)>);\n";
+    callbacks += "    std::cout \<\< \"Started\" \<\< std::endl;\n";
+    callbacks += "    return 0;\n";
+    callbacks += "  });\n";
+  }
+
+  if (ctpl(str name, list[Argument] args, str _) := taskCap.onAbort)
+  {
+    callbacks += "  <toLowerCase(CLASS_NAME)>.register_handler(\"<name>\", [&system](const std::string& data) {\n";
+    callbacks += "    system-\>api.in.<name>(<defaultForArgs(args)>);\n";
+    callbacks += "    std::cout \<\< \"Aborted\" \<\< std::endl;\n";
+    callbacks += "    return 0;\n";
+    callbacks += "  });\n";
+  }
 
   str source = trim("
 #include \<iostream\>
@@ -507,16 +545,7 @@ int main()
 
 <capabilities>
 
-  <toLowerCase(CLASS_NAME)>.register_handler(\"start\", [&system](const std::string& data) {
-    system-\>api.in.start(\"zone_1\");
-    std::cout \<\< \"Started\" \<\< std::endl;
-    return 0;
-  });
-  <toLowerCase(CLASS_NAME)>.register_handler(\"abort\", [&system](const std::string& data) {
-    system-\>api.in.abort();
-    std::cout \<\< \"Aborted\" \<\< std::endl;
-    return 0;
-  });
+<callbacks>
 
   <toLowerCase(CLASS_NAME)>.start();
   std::cout \<\< \"Initialized\" \<\< std::endl;
@@ -553,11 +582,19 @@ public Result generate(\task(str id, list[Argument] args, list[Statement] tstate
   // Generate capability files
   generateCapabilities(capMap, env);
 
+  // Compile calls
+  capDefinition = capDef("task", "", "", empty_ctpl(), empty_ctpl(), empty_ctpl(), empty_ctpl());
+  for (s <- tstatements, \ros_def(RosDefStatement stat) := s)
+  {
+    <env, capDefinition> = generate(stat, capDefinition, env);
+    println("Cap: <capDefinition>");
+  }
+
   // Now, we generate the supervisor
   generateSupervisor(id, capMap, env);
 
   // Finally, we generate the main file
-  generateMain(id, capMap, env);
+  generateMain(id, capMap, capDefinition, env);
 
   return <env, "">;
 }
