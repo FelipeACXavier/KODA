@@ -221,9 +221,12 @@ public bool generateCapability(str id, ServiceDef service)
       methodsDef += "  <ret> <id>_<name>(<argsToString(args)>) override;\n";
 
       methodsImpl += "<ret> <toComponent(id)>::<id>_<name>(<argsToString(args)>) {\n";
-      methodsImpl += "  auto bridge = dzn_locator.get\<<CLASS_NAME>\>();\n\n";
-      methodsImpl += "  std::cout \<\< \"Triggering: <id>_<name>\" \<\< std::endl;\n";
-      methodsImpl += "  bridge.publish(<nameToMQTT(cap.name, cap.ttype, "trigger")>, <argsToMQTT(cap.msg, args)>);\n";
+      methodsImpl += "  auto& pump = dzn_locator.get\<dzn::pump\>();\n";
+      methodsImpl += "  pump([this<if (size(args) > 0){>, <}><argsIdToString(args)>] {\n";
+      methodsImpl += "    std::cout \<\< \"Triggering: <id>_<name>\" \<\< std::endl;\n";
+      methodsImpl += "    auto bridge = dzn_locator.get\<<CLASS_NAME>\>();\n";
+      methodsImpl += "    bridge.publish(<nameToMQTT(cap.name, cap.ttype, "trigger")>, <argsToMQTT(cap.msg, args)>);\n";
+      methodsImpl += "  });\n";
       methodsImpl += "}\n\n";
     }
 
@@ -233,9 +236,12 @@ public bool generateCapability(str id, ServiceDef service)
       methodsDef += "  <ret> <id>_<name>(<argsToString(args)>) override;\n";
 
       methodsImpl += "<ret> <toComponent(id)>::<id>_<name>(<argsToString(args)>) {\n";
-      methodsImpl += "  auto bridge = dzn_locator.get\<<CLASS_NAME>\>();\n\n";
-      methodsImpl += "  std::cout \<\< \"Triggering: <id>_<name>\" \<\< std::endl;\n";
-      methodsImpl += "  bridge.publish(<nameToMQTT(cap.name, cap.ttype, "abort")>, <argsToMQTT(cap.msg, args)>);\n";
+      methodsImpl += "  auto& pump = dzn_locator.get\<dzn::pump\>();\n";
+      methodsImpl += "  pump([this<if (size(args) > 0){>, <}><argsIdToString(args)>] {\n";
+      methodsImpl += "    std::cout \<\< \"Triggering: <id>_<name>\" \<\< std::endl;\n";
+      methodsImpl += "    auto bridge = dzn_locator.get\<<CLASS_NAME>\>();\n";
+      methodsImpl += "    bridge.publish(<nameToMQTT(cap.name, cap.ttype, "abort")>, <argsToMQTT(cap.msg, args)>);\n";
+      methodsImpl += "  });\n";
       methodsImpl += "}\n\n";
     }
 
@@ -282,6 +288,7 @@ public:
   str source = trim("
 #include \"<toComponent(id)>.hh\"
 #include \<iostream\>
+#include \<dzn/pump.hh\>
 #include \"<uncapitalize(CLASS_NAME)>.hh\"
 
 <toComponent(id)>::<toComponent(id)>(dzn::locator const& locator)

@@ -1009,15 +1009,18 @@ public bool generateSupervisor(str taskId, map[str, str] capMap, Env env)
       else if (key == "Initialpose")
         cData = generateInitialPose(capMap[key], cap);
 
-      includes += cData.includes;
-      members += cData.members;
-      methods += cData.methods;
-      parameters += cData.parameters;
-      constructor += cData.constructor;
-      startUp += cData.startUp;
-      deps += cData.deps;
-      packageDeps += cData.packageDeps;
-      configParam += cData.configParam;
+      if (empty_data() !:= cData )
+      {
+        includes += cData.includes;
+        members += cData.members;
+        methods += cData.methods;
+        parameters += cData.parameters;
+        constructor += cData.constructor;
+        startUp += cData.startUp;
+        deps += cData.deps;
+        packageDeps += cData.packageDeps;
+        configParam += cData.configParam;
+      }
     }
 
   }

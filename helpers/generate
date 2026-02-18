@@ -1,0 +1,51 @@
+#!/bin/bash
+
+FILES=$(ls models/*.dzn)
+
+echo "Generating models"
+
+for FILE in ${FILES}; do
+  MODEL=`basename $FILE .dzn`
+  echo "Genering model: $MODEL";
+  if [[ $FILE == *_task.dzn ]]; then
+    dzn code -s $MODEL -I ./ -o ./models/cpp $FILE
+  else
+    dzn code -I ./ -o ./models/cpp $FILE
+  fi
+
+  if [ $? -ne 0 ]; then
+    exit -1;
+  fi
+done
+
+PROJECT_FOLDER="./iot"
+INCLUDE_FOLDER="$PROJECT_FOLDER/include"
+SRC_FOLDER="$PROJECT_FOLDER/src"
+
+echo "Dividing folders"
+cp ./models/cpp/*.hh $INCLUDE_FOLDER
+cp ./models/cpp/*.cc $SRC_FOLDER
+
+echo "Copying dezyne files"
+cp -r ./dzn_files/include/* $INCLUDE_FOLDER
+cp ./dzn_files/src/*.cc $SRC_FOLDER
+
+# Check if alarm is needed
+if [ ! -e "$INCLUDE_FOLDER/a_calarm.hh" ]; then
+  echo "Cleaning up files"
+  rm "$INCLUDE_FOLDER/calarm.hh"
+  rm "$SRC_FOLDER/calarm.cc"
+fi
+
+ROS_WS="./final"
+echo "Copying to workspace: $ROS_WS"
+mkdir -p "$ROS_WS"
+cp -r $PROJECT_FOLDER/* "$ROS_WS"
+
+echo "Building workspace: $ROS_WS"
+(
+  cd "$ROS_WS"
+  mkdir build
+  cmake -S . -B build
+  cmake --build build -j 6
+)
