@@ -1,0 +1,102 @@
+#!/bin/bash
+
+PROJECT_DIR=""
+PACKAGE_NAME=""
+TYPE="ros"
+
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+      --project)
+      PROJECT_DIR="$2"
+      shift
+      shift
+      ;;
+      --type)
+      TYPE="$2"
+      shift
+      shift
+      ;;
+      --name)
+      PACKAGE_NAME="$2"
+      shift
+      shift
+      ;;
+      *)
+      exit 1
+      ;;
+  esac
+done
+
+echo "Running generation with:"
+echo "  Project: $PROJECT_DIR"
+echo "  Package: $PACKAGE_NAME"
+echo "  Type: $TYPE"
+
+DZN_FILES="~/KODA/helpers/dzn_files"
+
+# These are generated
+MODELS_DIR="$PROJECT_DIR/models"
+DZN_SRC_DIR="$MODELS_DIR/cpp"
+FINAL_WS="~/ros2_ws/src/$PACKAGE_NAME"
+PACKAGE_DIR="$PROJECT_DIR/$TYPE"
+SRC_DIR="$PACKAGE_DIR/src"
+INCLUDE_DIR="$PACKAGE_DIR/include"
+
+FILES=$(ls $MODELS_DIR/*.dzn)
+if [ $? -ne 0 ]; then
+  exit -1;
+fi
+
+echo "Generating models"
+for FILE in ${FILES}; do
+  MODEL=`basename $FILE .dzn`
+
+  echo "Genering model: $MODEL";
+  if [[ $FILE == *_task.dzn ]]; then
+    dzn code -s $MODEL -I ./ -o "$DZN_SRC_DIR" $FILE
+  else
+    dzn code -I ./ -o "$DZN_SRC_DIR" $FILE
+  fi
+  if [ $? -ne 0 ]; then
+    exit -1;
+  fi
+done
+
+echo "Dividing folders"
+cp $DZN_SRC_DIR/*.hh $INCLUDE_DIR
+if [ $? -ne 0 ]; then
+  exit -1;
+fi
+
+cp $DZN_SRC_DIR/*.cc $SRC_DIR
+if [ $? -ne 0 ]; then
+  exit -1;
+fi
+
+echo "Copying dezyne files"
+cp -r $DZN_FILES/include $INCLUDE_DIR
+if [ $? -ne 0 ]; then
+  exit -1;
+fi
+
+cp $DZN_FILES/src/*.cc $SRC_DIR
+if [ $? -ne 0 ]; then
+  exit -1;
+fi
+
+# Check if alarm is needed
+if [ ! -e "$INCLUDE_DIR/a_calarm.hh" ]; then
+  echo "Cleaning up files"
+  rm "$INCLUDE_DIR/calarm.hh"
+  rm "$SRC_DIR/calarm.cc"
+fi
+
+echo "Copying to workspace: $FINAL_WS"
+mkdir -p $FINAL_WS
+cp -r $PACKAGE_DIR/* $FINAL_WS
+
+(
+  cd ~/ros2_ws
+  colcon build --symlink-installs
+)
