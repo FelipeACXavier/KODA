@@ -33,12 +33,13 @@ echo "  Project: $PROJECT_DIR"
 echo "  Package: $PACKAGE_NAME"
 echo "  Type: $TYPE"
 
-DZN_FILES="~/KODA/helpers/dzn_files"
+HOME_DIR="/home/$(id -un)"
+DZN_FILES="$HOME_DIR/KODA/helpers/dzn_files"
+FINAL_WS="$HOME_DIR/ros2_ws/src/$PACKAGE_NAME"
 
 # These are generated
 MODELS_DIR="$PROJECT_DIR/models"
 DZN_SRC_DIR="$MODELS_DIR/cpp"
-FINAL_WS="~/ros2_ws/src/$PACKAGE_NAME"
 PACKAGE_DIR="$PROJECT_DIR/$TYPE"
 SRC_DIR="$PACKAGE_DIR/src"
 INCLUDE_DIR="$PACKAGE_DIR/include"
@@ -97,6 +98,6 @@ mkdir -p $FINAL_WS
 cp -r $PACKAGE_DIR/* $FINAL_WS
 
 (
-  cd ~/ros2_ws
-  colcon build --symlink-installs
+  cd $HOME/ros2_ws
+  colcon build --symlink-install
 )
