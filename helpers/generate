@@ -37,6 +37,12 @@ if [ ! -e "$INCLUDE_FOLDER/a_calarm.hh" ]; then
   rm "$SRC_FOLDER/calarm.cc"
 fi
 
+if [[ "$TYPE" == "ros" ]]; then
+  echo "Cleaning up callback files"
+  rm "$INCLUDE_FOLDER/callback.hh"
+  rm "$SRC_FOLDER/callback.cc"
+fi
+
 ROS_WS="./final"
 echo "Copying to workspace: $ROS_WS"
 mkdir -p "$ROS_WS"
